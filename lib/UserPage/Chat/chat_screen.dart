@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:farmcare/services/chat_service.dart';
 import 'package:farmcare/utils/app_localizations.dart';
 import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class ChatScreen extends StatefulWidget {
   final String receiverId;
@@ -31,48 +33,372 @@ class _ChatScreenState extends State<ChatScreen> {
   List<Map<String, dynamic>> _messages = [];
   bool _isLoading = true;
   String? _error;
-  String? _userId;
   List<String> _onlineUsers = [];
+  final Set<String> _processedMessageIds = {};
+  late IO.Socket socket;
+  bool _isConnected = false;
+  bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
-    _initializeChat();
+    _initSocket();
+    _loadMessages();
+
+    // Set up periodic connection check
+    Timer.periodic(Duration(seconds: 15), (timer) {
+      if (mounted) {
+        if (!_isConnected) {
+          print('Periodic reconnection check - reconnecting socket');
+          socket.connect();
+        }
+      } else {
+        timer.cancel();
+      }
+    });
   }
 
-  Future<void> _initializeChat() async {
-    setState(() {
-      _userId = widget.currentUserId;
-    });
+  void _initSocket() {
+    try {
+      print('========== INITIALIZING SOCKET ==========');
+      print('Initializing socket for userId: ${widget.currentUserId}');
 
-    await _loadMessages();
-    _setupSocketListeners();
+      // Initialize socket with proper options
+      socket =
+          IO.io('https://farmcare-backend-new.onrender.com', <String, dynamic>{
+        'transports': ['websocket', 'polling'],
+        'autoConnect': false,
+        'forceNew': true,
+        'query': {
+          'userId': widget.currentUserId,
+          'token': widget.token,
+          'chatWith': widget.receiverId
+        },
+        'reconnection': true,
+        'reconnectionDelay': 1000,
+        'reconnectionAttempts': 10,
+        'timeout': 10000,
+      });
 
-    // Connect to socket with user ID
-    _chatService.connectSocket(_userId!);
+      socket.onConnect((_) {
+        print('Socket connected successfully');
+        setState(() => _isConnected = true);
+
+        // Join rooms for this chat
+        _joinChatRooms();
+
+        // Also connect the ChatService socket to ensure both are connected
+        _chatService.connectSocket(widget.currentUserId);
+
+        // Request server to send any pending messages
+        socket.emit('request_pending_messages',
+            {'userId': widget.currentUserId, 'receiverId': widget.receiverId});
+
+        // Notify server about active chat
+        socket.emit('active_chat',
+            {'userId': widget.currentUserId, 'receiverId': widget.receiverId});
+      });
+
+      socket.onDisconnect((_) {
+        print('Socket disconnected');
+        setState(() => _isConnected = false);
+      });
+
+      socket
+          .onConnectError((error) => print('Socket connection error: $error'));
+      socket.onError((error) => print('Socket error: $error'));
+
+      // Listen for all possible message events
+      _setupSocketListeners();
+
+      // Connect the socket
+      print('Connecting socket...');
+      socket.connect();
+
+      // Start periodic connection check
+      _startSocketCheck();
+
+      print('========== FINISHED INITIALIZING SOCKET ==========');
+    } catch (e) {
+      print('Error initializing socket: $e');
+      print(e.toString());
+    }
+  }
+
+  void _joinChatRooms() {
+    try {
+      print('========== JOINING CHAT ROOMS ==========');
+
+      // Join user's own room
+      print('Joining own room: ${widget.currentUserId}');
+      socket.emit('join', {'userId': widget.currentUserId});
+      socket.emit('join', widget.currentUserId);
+
+      // Join receiver's room
+      print('Joining receiver room: ${widget.receiverId}');
+      socket.emit('join', {'userId': widget.receiverId});
+      socket.emit('join', widget.receiverId);
+
+      // Create room IDs for different formats
+      final directRoom = '${widget.currentUserId}-${widget.receiverId}';
+      final reverseRoom = '${widget.receiverId}-${widget.currentUserId}';
+      final combinedRoom = [widget.currentUserId, widget.receiverId]..sort();
+      final sortedRoom = combinedRoom.join('-');
+
+      // Also create underscore versions
+      final directRoomUnderscore = directRoom.replaceAll('-', '_');
+      final reverseRoomUnderscore = reverseRoom.replaceAll('-', '_');
+      final sortedRoomUnderscore = sortedRoom.replaceAll('-', '_');
+
+      // Join direct room
+      print('Joining direct room: $directRoom');
+      socket.emit('join_room', {'room': directRoom});
+      socket.emit('join_chat', {'room': directRoom});
+      socket.emit('join_chat', directRoom);
+      socket.emit('join', directRoom);
+
+      // Join reverse room
+      print('Joining reverse room: $reverseRoom');
+      socket.emit('join_room', {'room': reverseRoom});
+      socket.emit('join_chat', {'room': reverseRoom});
+      socket.emit('join_chat', reverseRoom);
+      socket.emit('join', reverseRoom);
+
+      // Join sorted room
+      print('Joining sorted room: $sortedRoom');
+      socket.emit('join_room', {'room': sortedRoom});
+      socket.emit('join_chat', {'room': sortedRoom});
+      socket.emit('join_chat', sortedRoom);
+      socket.emit('join', sortedRoom);
+
+      // Join underscore versions
+      print('Joining underscore rooms');
+      socket.emit('join_room', {'room': directRoomUnderscore});
+      socket.emit('join_room', {'room': reverseRoomUnderscore});
+      socket.emit('join_room', {'room': sortedRoomUnderscore});
+      socket.emit('join', directRoomUnderscore);
+      socket.emit('join', reverseRoomUnderscore);
+      socket.emit('join', sortedRoomUnderscore);
+
+      // Join private chat room
+      print('Joining private chat room');
+      socket.emit('join_private_chat',
+          {'userId': widget.currentUserId, 'receiverId': widget.receiverId});
+
+      // Request acknowledgment
+      socket.emit('check_rooms', (rooms) {
+        print('Rooms joined: $rooms');
+      });
+
+      print('========== FINISHED JOINING CHAT ROOMS ==========');
+    } catch (e) {
+      print('Error joining chat rooms: $e');
+      print(e.toString());
+    }
   }
 
   void _setupSocketListeners() {
-    _chatService.onNewMessage = (message) {
-      if (mounted) {
-        // Check if message belongs to this chat
-        if (message['senderId'] == widget.receiverId ||
-            message['receiverId'] == widget.receiverId) {
-          setState(() {
-            _messages.add(message);
-          });
-          _scrollToBottom();
-        }
-      }
-    };
+    try {
+      print('========== SETTING UP SOCKET LISTENERS ==========');
 
-    _chatService.onOnlineUsersUpdate = (onlineUsers) {
-      if (mounted) {
-        setState(() {
-          _onlineUsers = onlineUsers;
-        });
+      // Listen for all possible message event names
+      socket.on('receive_message', (data) {
+        print('Received receive_message event: $data');
+        _handleIncomingMessage(data);
+      });
+
+      socket.on('newMessage', (data) {
+        print('Received newMessage event: $data');
+        _handleIncomingMessage(data);
+      });
+
+      socket.on('message', (data) {
+        print('Received message event: $data');
+        _handleIncomingMessage(data);
+      });
+
+      socket.on('private_message', (data) {
+        print('Received private_message event: $data');
+        _handleIncomingMessage(data);
+      });
+
+      socket.on('direct_message', (data) {
+        print('Received direct_message event: $data');
+        _handleIncomingMessage(data);
+      });
+
+      socket.on('room_message', (data) {
+        print('Received room_message event: $data');
+        _handleIncomingMessage(data);
+      });
+
+      socket.on('chat_message', (data) {
+        print('Received chat_message event: $data');
+        _handleIncomingMessage(data);
+      });
+
+      // Listen for online users updates
+      socket.on('getOnlineUsers', (data) {
+        print('Received online users update: $data');
+        if (mounted && data is List) {
+          setState(() {
+            _onlineUsers = List<String>.from(data);
+          });
+        }
+      });
+
+      print('========== FINISHED SETTING UP SOCKET LISTENERS ==========');
+    } catch (e) {
+      print('Error setting up socket listeners: $e');
+      print(e.toString());
+    }
+  }
+
+  void _handleIncomingMessage(dynamic data) {
+    try {
+      print('========== HANDLING INCOMING MESSAGE ==========');
+      print('Received message data type: ${data.runtimeType}');
+      print('Received message data: $data');
+
+      Map<String, dynamic> message;
+
+      // Handle different message formats
+      if (data is Map) {
+        message = Map<String, dynamic>.from(data);
+        print('Message is a Map, converted to: $message');
+      } else if (data is String) {
+        // Try to parse string as JSON
+        try {
+          message = json.decode(data);
+          print('Message is a String, parsed JSON: $message');
+        } catch (e) {
+          print('Error parsing string message: $e');
+          message = {
+            'content': data,
+            'timestamp': DateTime.now().toIso8601String(),
+            'senderId': widget.receiverId, // Assume it's from the receiver
+            'receiverId': widget.currentUserId, // Assume it's to the sender
+          };
+          print('Created fallback message: $message');
+        }
+      } else {
+        print('Unhandled message format: ${data.runtimeType}');
+        print('========== END HANDLING INCOMING MESSAGE (ERROR) ==========');
+        return;
       }
-    };
+
+      // Check if this is a private message wrapper
+      if (message.containsKey('message') && message['message'] is Map) {
+        print('Unwrapping nested message from: $message');
+        message = Map<String, dynamic>.from(message['message']);
+        print('Unwrapped to: $message');
+      }
+
+      // Check if this is a room message
+      if (message.containsKey('room') &&
+          message.containsKey('message') &&
+          message['message'] is Map) {
+        print('Unwrapping room message from: $message');
+        message = Map<String, dynamic>.from(message['message']);
+        print('Unwrapped room message to: $message');
+      }
+
+      // Check if this is a 'to/from' format
+      if (message.containsKey('to') && message.containsKey('from')) {
+        print('Found to/from format message: $message');
+        // Create a standard format message
+        final content = message['content'] ?? message['message'] ?? '';
+        final timestamp =
+            message['timestamp'] ?? DateTime.now().toIso8601String();
+        message = {
+          'senderId': message['from'],
+          'receiverId': message['to'],
+          'content': content,
+          'timestamp': timestamp,
+        };
+        print('Converted to standard format: $message');
+      }
+
+      // Ensure we have sender and receiver IDs
+      final senderId = message['senderId'] ?? '';
+      final receiverId = message['receiverId'] ?? '';
+
+      print('Message senderId: $senderId, receiverId: $receiverId');
+      print(
+          'Current chat: currentUserId: ${widget.currentUserId}, receiverId: ${widget.receiverId}');
+
+      // Check if this message is for the current chat
+      bool isForCurrentChat = false;
+
+      // Check if the message is between the current sender and receiver
+      if ((senderId == widget.receiverId &&
+              receiverId == widget.currentUserId) ||
+          (senderId == widget.currentUserId &&
+              receiverId == widget.receiverId)) {
+        isForCurrentChat = true;
+        print('Message is for current chat');
+      } else {
+        print('Message is NOT for current chat, ignoring');
+        print('Sender ID match: ${senderId == widget.receiverId}');
+        print('Receiver ID match: ${receiverId == widget.currentUserId}');
+        print('Reverse sender match: ${senderId == widget.currentUserId}');
+        print('Reverse receiver match: ${receiverId == widget.receiverId}');
+        print('========== END HANDLING INCOMING MESSAGE (IGNORED) ==========');
+        return;
+      }
+
+      // Check for content
+      final content = message['content'] ?? message['message'] ?? '';
+      if (content.isEmpty) {
+        print('Message has no content, ignoring');
+        print(
+            '========== END HANDLING INCOMING MESSAGE (NO CONTENT) ==========');
+        return;
+      }
+      print('Message content: $content');
+
+      // Ensure the message has an ID to prevent duplicates
+      if (!message.containsKey('_id')) {
+        message['_id'] =
+            '${message['senderId'] ?? ''}_${message['content'] ?? message['message'] ?? ''}_${DateTime.now().millisecondsSinceEpoch}';
+        print('Generated message ID: ${message['_id']}');
+      }
+
+      // Check if we've already processed this message
+      final messageId = message['_id'];
+      if (_processedMessageIds.contains(messageId)) {
+        print('Message with ID $messageId already processed, ignoring');
+        print(
+            '========== END HANDLING INCOMING MESSAGE (DUPLICATE) ==========');
+        return;
+      }
+
+      // Add to processed IDs to prevent duplicates
+      _processedMessageIds.add(messageId);
+      print('Added message ID to processed list: $messageId');
+
+      // Add the message to the UI
+      setState(() {
+        _messages.add(message);
+        print(
+            'Added message to UI: ${message['content'] ?? message['message']}');
+
+        // If this was a message we were sending, mark sending as complete
+        if (senderId == widget.currentUserId) {
+          _isSending = false;
+        }
+      });
+
+      // Scroll to the bottom
+      _scrollToBottom();
+      print('Scrolled to bottom after adding message');
+
+      print('========== END HANDLING INCOMING MESSAGE ==========');
+    } catch (e) {
+      print('Error handling incoming message: $e');
+      print(e.toString());
+      print('========== END HANDLING INCOMING MESSAGE (ERROR) ==========');
+    }
   }
 
   Future<void> _loadMessages() async {
@@ -86,7 +412,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (mounted) {
         setState(() {
-          _messages = messages;
+          // Process each message and add to the processed IDs set
+          _messages = [];
+          _processedMessageIds.clear();
+
+          for (final message in messages) {
+            final messageId = message['_id'] ??
+                '${message['senderId']}_${message['content'] ?? message['message']}_${message['timestamp'] ?? message['createdAt']}';
+            _processedMessageIds.add(messageId);
+            _messages.add(message);
+          }
+
           _isLoading = false;
         });
 
@@ -114,35 +450,246 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _startSocketCheck() {
+    // Check both sockets every 5 seconds
+    Timer.periodic(Duration(seconds: 5), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      _checkSocketConnections();
+    });
+  }
+
+  void _checkSocketConnections() {
+    // Check direct socket
+    if (!socket.connected) {
+      print('Direct socket disconnected, reconnecting...');
+      socket.connect();
+    }
+
+    // Check ChatService socket
+    if (_chatService.socket == null || !_chatService.socket!.connected) {
+      print('ChatService socket disconnected, reconnecting...');
+      _chatService.connectSocket(widget.currentUserId);
+    }
+  }
+
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty) return;
-
-    final message = _messageController.text;
-    _messageController.clear();
-
     try {
-      final tempMessage = {
-        'message': message,
-        'senderId': _userId,
+      print('========== SENDING MESSAGE ==========');
+
+      // Get the message content
+      final messageContent = _messageController.text.trim();
+
+      // Check if the message is empty
+      if (messageContent.isEmpty) {
+        print('Message is empty, not sending');
+        print('========== FINISHED SENDING MESSAGE (EMPTY) ==========');
+        return;
+      }
+
+      print('Sending message: $messageContent');
+      print('From: ${widget.currentUserId} to: ${widget.receiverId}');
+
+      // Clear the text field
+      _messageController.clear();
+
+      // Check socket connections before sending
+      _checkSocketConnections();
+
+      // Show reconnection message if socket is not connected
+      if (!_isConnected) {
+        print('Socket not connected, showing reconnection message');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Connection lost. Trying to reconnect...')),
+        );
+        socket.connect();
+        _chatService.connectSocket(widget.currentUserId);
+
+        // Wait a moment for connection to establish
+        await Future.delayed(Duration(milliseconds: 300));
+      }
+
+      // Create a temporary message ID
+      final tempMessageId =
+          '${widget.currentUserId}_${messageContent}_${DateTime.now().millisecondsSinceEpoch}';
+
+      // Create a message object
+      final message = {
+        '_id': tempMessageId,
+        'senderId': widget.currentUserId,
         'receiverId': widget.receiverId,
-        'createdAt': DateTime.now().toIso8601String(),
+        'content': messageContent,
+        'timestamp': DateTime.now().toIso8601String(),
+        'isSending': true, // Mark as sending for UI
       };
 
-      setState(() {
-        _messages.add(tempMessage);
-      });
-      _scrollToBottom();
+      print('Created message object: $message');
 
-      await _chatService.sendMessage(
+      // Add the message to the UI immediately
+      setState(() {
+        _messages.add(message);
+        _processedMessageIds.add(tempMessageId);
+        _isSending = true;
+      });
+
+      // Scroll to the bottom
+      _scrollToBottom();
+      print('Added message to UI and scrolled to bottom');
+
+      // Try joining the room again before sending
+      _joinChatRooms();
+
+      // Try multiple message formats to ensure delivery
+      print('Emitting message through socket with multiple formats');
+
+      // Format 1: Basic message
+      socket.emit('send_message', message);
+      print('Emitted with send_message event');
+
+      // Format 2: Alternative event name
+      socket.emit('sendMessage', message);
+      print('Emitted with sendMessage event');
+
+      // Format 3: Generic message event
+      socket.emit('message', message);
+      print('Emitted with message event');
+
+      // Format 4: Private message format
+      socket.emit(
+          'private_message', {'to': widget.receiverId, 'message': message});
+      print('Emitted with private_message event');
+
+      // Format 5: Direct message format
+      socket.emit('direct_message', {
+        'to': widget.receiverId,
+        'from': widget.currentUserId,
+        'message': message
+      });
+      print('Emitted with direct_message event');
+
+      // Format 6: Room message format
+      final directRoom = '${widget.currentUserId}-${widget.receiverId}';
+      final reverseRoom = '${widget.receiverId}-${widget.currentUserId}';
+      final combinedRoom = [widget.currentUserId, widget.receiverId]..sort();
+      final sortedRoom = combinedRoom.join('-');
+
+      socket.emit('room_message', {'room': directRoom, 'message': message});
+      print('Emitted room_message to room: $directRoom');
+
+      socket.emit('room_message', {'room': reverseRoom, 'message': message});
+      print('Emitted room_message to room: $reverseRoom');
+
+      socket.emit('room_message', {'room': sortedRoom, 'message': message});
+      print('Emitted room_message to room: $sortedRoom');
+
+      // Also try with underscores
+      socket.emit('room_message',
+          {'room': directRoom.replaceAll('-', '_'), 'message': message});
+      socket.emit('room_message',
+          {'room': reverseRoom.replaceAll('-', '_'), 'message': message});
+      socket.emit('room_message',
+          {'room': sortedRoom.replaceAll('-', '_'), 'message': message});
+
+      // Format 7: Chat message format
+      socket.emit('chat_message', {
+        'senderId': widget.currentUserId,
+        'receiverId': widget.receiverId,
+        'message': messageContent,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      print('Emitted with chat_message event');
+
+      // Format 8: Simple text message
+      socket.emit('message_text', messageContent);
+      print('Emitted simple text message');
+
+      // Format 9: JSON string message
+      socket.emit('message_json', json.encode(message));
+      print('Emitted JSON string message');
+
+      print('Finished emitting message via socket');
+
+      // Ensure ChatService socket is connected before sending
+      if (_chatService.socket == null || !_chatService.socket!.connected) {
+        print('ChatService socket not connected, reconnecting...');
+        _chatService.connectSocket(widget.currentUserId);
+
+        // Wait a moment for connection to establish
+        await Future.delayed(Duration(milliseconds: 300));
+      }
+
+      // Also send via HTTP as fallback
+      print('Sending message via HTTP as fallback');
+      _chatService
+          .sendMessage(
         widget.receiverId,
-        message,
+        messageContent,
         widget.token,
         widget.currentUserId,
-      );
+      )
+          .then((result) {
+        print('HTTP message send successful, result: $result');
+
+        // If we got a real ID back from the server, update our message
+        if (result != null && result['_id'] != null) {
+          // Add the server ID to processed IDs
+          _processedMessageIds.add(result['_id']);
+          print('Added server message ID to processed IDs: ${result['_id']}');
+
+          // Update the message in the UI with the server ID
+          setState(() {
+            for (int i = 0; i < _messages.length; i++) {
+              if (_messages[i]['_id'] == tempMessageId) {
+                _messages[i]['_id'] = result['_id'];
+                _messages[i]['isSending'] = false;
+                break;
+              }
+            }
+          });
+        }
+
+        // Clear sending state after a delay
+        Future.delayed(Duration(seconds: 2), () {
+          if (mounted) {
+            setState(() {
+              _isSending = false;
+
+              // Update all messages that are still marked as sending
+              for (int i = 0; i < _messages.length; i++) {
+                if (_messages[i]['isSending'] == true) {
+                  _messages[i]['isSending'] = false;
+                }
+              }
+            });
+          }
+        });
+      }).catchError((error) {
+        print('HTTP message send failed: $error');
+
+        // Clear sending state on error
+        setState(() {
+          _isSending = false;
+        });
+      });
+
+      print('========== FINISHED SENDING MESSAGE ==========');
     } catch (e) {
+      print('Error sending message: $e');
+      print(e.toString());
+
+      // Clear sending state on error
+      setState(() {
+        _isSending = false;
+      });
+
+      // Show error message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to send message: ${e.toString()}'),
+          content: Text('Failed to send message: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -177,15 +724,15 @@ class _ChatScreenState extends State<ChatScreen> {
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: isUserOnline() ? Colors.green : Colors.grey,
+                    color: _isConnected ? Colors.green : Colors.grey,
                     shape: BoxShape.circle,
                   ),
                 ),
                 SizedBox(width: 4),
                 Text(
-                  isUserOnline()
+                  _isConnected
                       ? AppLocalizations.translate('online', currentLanguage)
-                      : AppLocalizations.translate('offline', currentLanguage),
+                      : 'Socket Offline',
                   style: TextStyle(
                     color: Colors.white70,
                     fontSize: 12,
@@ -195,6 +742,18 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ],
         ),
+        actions: [
+          if (!_isConnected)
+            IconButton(
+              icon: Icon(Icons.refresh, color: Colors.white),
+              onPressed: () {
+                socket.connect();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Reconnecting socket...')),
+                );
+              },
+            ),
+        ],
         iconTheme: IconThemeData(color: Colors.white),
       ),
       body: Container(
@@ -297,11 +856,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
     for (final message in _messages) {
       try {
-        final dateTimeStr = message['createdAt'].toString();
+        final dateTimeStr = message['timestamp'] ?? message['createdAt'] ?? '';
         DateTime dateTime;
 
         try {
-          dateTime = DateTime.parse(dateTimeStr);
+          dateTime = DateTime.parse(dateTimeStr.toString());
         } catch (e) {
           // Fallback if parsing fails
           print('Error parsing message date: $dateTimeStr, error: $e');
@@ -403,7 +962,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> message) {
-    final isMe = message['senderId'] == _userId;
+    final isMe = message['senderId'] == widget.currentUserId;
+    final isSending = isMe && _isSending && !message.containsKey('_id');
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -434,7 +994,7 @@ class _ChatScreenState extends State<ChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              message['message'] ?? '',
+              message['content'] ?? message['message'] ?? '',
               style: TextStyle(
                 color: isMe ? Colors.white : Colors.black87,
                 fontSize: 16,
@@ -445,7 +1005,7 @@ class _ChatScreenState extends State<ChatScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  _formatTime(message['createdAt']),
+                  _formatTime(message['timestamp'] ?? message['createdAt']),
                   style: TextStyle(
                     color: isMe ? Colors.white70 : Colors.grey,
                     fontSize: 10,
@@ -453,11 +1013,21 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 if (isMe) ...[
                   SizedBox(width: 4),
-                  Icon(
-                    Icons.check,
-                    size: 12,
-                    color: Colors.white70,
-                  ),
+                  isSending
+                      ? SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white70),
+                          ),
+                        )
+                      : Icon(
+                          Icons.check,
+                          size: 12,
+                          color: Colors.white70,
+                        ),
                 ],
               ],
             ),
@@ -530,10 +1100,20 @@ class _ChatScreenState extends State<ChatScreen> {
               color: Colors.green.shade800,
               shape: BoxShape.circle,
             ),
-            child: IconButton(
-              icon: Icon(Icons.send, color: Colors.white),
-              onPressed: _sendMessage,
-            ),
+            child: _isSending
+                ? Container(
+                    width: 48,
+                    height: 48,
+                    padding: EdgeInsets.all(12),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : IconButton(
+                    icon: Icon(Icons.send, color: Colors.white),
+                    onPressed: _sendMessage,
+                  ),
           ),
         ],
       ),
@@ -545,6 +1125,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _chatService.disconnectSocket();
+    socket.disconnect();
+    socket.dispose();
     super.dispose();
   }
 }

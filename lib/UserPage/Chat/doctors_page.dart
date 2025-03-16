@@ -469,34 +469,53 @@ class _DoctorsPageState extends State<DoctorsPage> {
   void _openChat(dynamic user) {
     // Debug logging
     print('Raw user object: $user');
-    if (user is chat_service.Doctor) {
+    print('User type: ${user.runtimeType}');
+
+    if (user is chat_service.ChatUser) {
+      print('User is a ChatUser object with id: ${user.id}');
+      print('User name: ${user.name}');
+      print('User profilePic: ${user.profilePic}');
+    } else if (user is doc_service.Doctor) {
       print('User is a Doctor object with id: ${user.id}');
+      print('User name: ${user.name}');
     } else {
-      print('User is not a Doctor object: ${user.runtimeType}');
+      print('User is not a ChatUser or Doctor object: ${user.runtimeType}');
+      // Try to access properties dynamically
+      try {
+        print('Trying to access id property: ${user.id}');
+        print('Trying to access name property: ${user.name}');
+      } catch (e) {
+        print('Error accessing properties: $e');
+      }
     }
 
-    // Extract the doctor ID and validate it
-    String doctorId = '';
-    String doctorName = 'Unknown Doctor';
+    // Extract the user ID and validate it
+    String receiverId = '';
+    String receiverName = 'Unknown User';
 
     if (user is doc_service.Doctor) {
-      doctorId = user.id;
-      doctorName = user.name;
-    } else if (user is chat_service.Doctor) {
-      doctorId = user.id;
-      doctorName = user.name;
+      receiverId = user.id;
+      receiverName = user.name;
+    } else if (user is chat_service.ChatUser) {
+      receiverId = user.id;
+      receiverName = user.name;
     } else if (user != null) {
-      doctorId = user.id ?? '';
-      doctorName = user.name ?? 'Unknown Doctor';
+      try {
+        receiverId = user.id ?? '';
+        receiverName = user.name ?? 'Unknown User';
+      } catch (e) {
+        print('Error extracting id/name from user: $e');
+      }
     }
 
-    print('Opening chat with doctorId: $doctorId, doctorName: $doctorName');
+    print(
+        'Opening chat with receiverId: $receiverId, receiverName: $receiverName');
 
-    // Validate that we have a non-empty doctorId
-    if (doctorId.isEmpty) {
-      print('ERROR: Attempted to open chat with empty doctorId');
+    // Validate that we have a non-empty receiverId
+    if (receiverId.isEmpty) {
+      print('ERROR: Attempted to open chat with empty receiverId');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot open chat: Invalid doctor ID')),
+        const SnackBar(content: Text('Cannot open chat: Invalid user ID')),
       );
       return;
     }
@@ -505,8 +524,8 @@ class _DoctorsPageState extends State<DoctorsPage> {
       context,
       MaterialPageRoute(
         builder: (context) => ChatScreen(
-          doctorId: doctorId,
-          doctorName: doctorName,
+          receiverId: receiverId,
+          receiverName: receiverName,
           currentUserId: widget.currentUserId,
           token: widget.token,
         ),

@@ -10,25 +10,26 @@ import 'chat_screen.dart';
 // This is a helper function to fix the _openChat method
 void openChat(
     BuildContext context, dynamic user, String currentUserId, String token) {
-  // Extract the doctor ID and validate it
-  String doctorId = '';
-  String doctorName = 'Unknown Doctor';
+  // Extract the user ID and validate it
+  String receiverId = '';
+  String receiverName = 'Unknown User';
 
   if (user is doc_service.Doctor) {
-    doctorId = user.id;
-    doctorName = user.name;
+    receiverId = user.id;
+    receiverName = user.name;
   } else if (user != null) {
-    doctorId = user.id ?? '';
-    doctorName = user.name ?? 'Unknown Doctor';
+    receiverId = user.id ?? '';
+    receiverName = user.name ?? 'Unknown User';
   }
 
-  print('Opening chat with doctorId: $doctorId, doctorName: $doctorName');
+  print(
+      'Opening chat with receiverId: $receiverId, receiverName: $receiverName');
 
-  // Validate that we have a non-empty doctorId
-  if (doctorId.isEmpty) {
-    print('ERROR: Attempted to open chat with empty doctorId');
+  // Validate that we have a non-empty receiverId
+  if (receiverId.isEmpty) {
+    print('ERROR: Attempted to open chat with empty receiverId');
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Cannot open chat: Invalid doctor ID')),
+      const SnackBar(content: Text('Cannot open chat: Invalid user ID')),
     );
     return;
   }
@@ -37,8 +38,8 @@ void openChat(
     context,
     MaterialPageRoute(
       builder: (context) => ChatScreen(
-        doctorId: doctorId,
-        doctorName: doctorName,
+        receiverId: receiverId,
+        receiverName: receiverName,
         currentUserId: currentUserId,
         token: token,
       ),

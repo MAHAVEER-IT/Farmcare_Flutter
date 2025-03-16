@@ -16,8 +16,9 @@ class ChatUser {
   });
 
   factory ChatUser.fromJson(Map<String, dynamic> json) {
+    print('Parsing ChatUser from JSON: $json');
     return ChatUser(
-      id: json['_id'] ?? '',
+      id: json['id'] ?? json['_id'] ?? '',
       name: json['name'] ?? '',
       profilePic: json['profilePic'] ?? '',
     );
@@ -35,9 +36,10 @@ class ChatMessage {
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
-      content: json['message'] ?? '',
-      timestamp:
-          DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      content: json['content'] ?? json['message'] ?? '',
+      timestamp: DateTime.parse(json['timestamp'] ??
+          json['createdAt'] ??
+          DateTime.now().toIso8601String()),
     );
   }
 }
@@ -54,6 +56,7 @@ class ChatHistory {
   });
 
   factory ChatHistory.fromJson(Map<String, dynamic> json) {
+    print('Parsing ChatHistory from JSON: $json');
     return ChatHistory(
       user: ChatUser.fromJson(json['user'] ?? {}),
       lastMessage: json['lastMessage'] != null
@@ -66,20 +69,41 @@ class ChatHistory {
 
 class ChatService {
   static const String baseUrl =
-      'http://10.0.2.2:8000/api'; // Updated port to 8000
+      'https://farmcare-backend-new.onrender.com/api/v1'; // Updated to match backend routes
   static const String socketUrl =
-      'http://10.0.2.2:8000'; // Updated port to 8000
+      'https://farmcare-backend-new.onrender.com'; // Socket URL remains the same
   IO.Socket? socket;
   Function(Map<String, dynamic>)? onNewMessage;
   Function(List<String>)? onOnlineUsersUpdate;
+  String? _currentSocketUserId; // Track the current user ID
 
   // Map to store mock messages between users
   final Map<String, List<Map<String, dynamic>>> _mockMessages = {};
 
+  // Updated endpoints to match backend routes
+  static const String sendMessageEndpoint = '/message/send';
+  static const String getChatHistoryEndpoint = '/message/history/';
+  static const String getDoctorChatsEndpoint = '/message/doctor/chats';
+
   void connectSocket(String userId) {
     try {
-      // Disconnect any existing socket first
-      disconnectSocket();
+      print('========== CONNECTING SOCKET ==========');
+      print('Connecting socket for userId: $userId');
+
+      // Only disconnect if we're connecting with a different user ID
+      if (socket != null) {
+        if (_currentSocketUserId == userId && socket!.connected) {
+          print(
+              'Socket already connected with userId: $userId, reusing connection');
+          return;
+        }
+
+        // Disconnect existing socket if it's for a different user
+        print('Disconnecting existing socket for different user');
+        disconnectSocket();
+      }
+
+      _currentSocketUserId = userId; // Store the user ID
 
       socket = IO.io(socketUrl, <String, dynamic>{
         'transports': ['websocket', 'polling'],
@@ -87,27 +111,49 @@ class ChatService {
         'query': {'userId': userId},
         'reconnection': true,
         'reconnectionDelay': 1000,
-        'reconnectionAttempts': 5,
-        'timeout': 5000,
+        'reconnectionAttempts': 10,
+        'timeout': 10000,
       });
 
       socket!.onConnect((_) {
         print('Socket connected with userId: $userId');
+
+        // Join user's room for private messages - this is critical
+        socket!.emit('join', {'userId': userId});
+        print('Joined room for userId: $userId');
+
+        // Also emit the join event without wrapping in an object (for compatibility)
+        socket!.emit('join', userId);
+        print('Also joined room with direct userId: $userId');
+
+        // Join additional room formats
+        socket!.emit('join_user', userId);
+        socket!.emit('join_user', {'userId': userId});
+        print('Joined additional room formats');
+
+        // Emit a connection acknowledgment request
+        socket!.emit('connection_ack', {'userId': userId});
+        print('Requested connection acknowledgment');
+
+        // Request pending messages
+        socket!.emit('request_pending_messages', {'userId': userId});
+        print('Requested pending messages');
       });
 
-      socket!.on('newMessage', (data) {
-        try {
-          if (onNewMessage != null) {
-            final message = Map<String, dynamic>.from(data);
-            onNewMessage!(message);
-          }
-        } catch (e) {
-          print('Error handling new message: $e');
-        }
-      });
+      // Listen for all possible message event names
+      _setupMessageListener('newMessage');
+      _setupMessageListener('receive_message');
+      _setupMessageListener('message');
+      _setupMessageListener('private_message');
+      _setupMessageListener('direct_message');
+      _setupMessageListener('chat_message');
+      _setupMessageListener('room_message');
+      _setupMessageListener('message_text');
+      _setupMessageListener('message_json');
 
       socket!.on('getOnlineUsers', (data) {
         try {
+          print('Received online users: $data');
           if (onOnlineUsersUpdate != null && data is List) {
             onOnlineUsersUpdate!(List<String>.from(data));
           }
@@ -116,12 +162,139 @@ class ChatService {
         }
       });
 
+      socket!.on('connect_ack', (data) {
+        print('Received connection acknowledgment: $data');
+      });
+
+      socket!.on('pending_messages', (data) {
+        print('Received pending messages: $data');
+        try {
+          if (data is List) {
+            for (var msg in data) {
+              if (onNewMessage != null) {
+                onNewMessage!(Map<String, dynamic>.from(msg));
+              }
+            }
+          }
+        } catch (e) {
+          print('Error handling pending messages: $e');
+        }
+      });
+
       socket!.onDisconnect((_) => print('Socket disconnected'));
       socket!.onError((err) => print('Socket error: $err'));
       socket!.onConnectError((err) => print('Socket connect error: $err'));
+
+      print('========== FINISHED CONNECTING SOCKET ==========');
     } catch (e) {
       print('Error setting up socket connection: $e');
+      print(e.toString());
     }
+  }
+
+  void _setupMessageListener(String eventName) {
+    socket!.on(eventName, (data) {
+      try {
+        print('========== RECEIVED $eventName EVENT ==========');
+        print('Received $eventName event with data type: ${data.runtimeType}');
+        print('Received $eventName event data: $data');
+
+        Map<String, dynamic> message;
+
+        // Handle different message formats
+        if (data is Map) {
+          message = Map<String, dynamic>.from(data);
+          print('Message is a Map, converted to: $message');
+        } else if (data is String) {
+          // Try to parse string as JSON
+          try {
+            message = json.decode(data);
+            print('Message is a String, parsed JSON: $message');
+          } catch (e) {
+            print('Error parsing string message: $e');
+            message = {
+              'content': data,
+              'timestamp': DateTime.now().toIso8601String()
+            };
+            print('Created fallback message: $message');
+          }
+        } else {
+          print('Unhandled message format: ${data.runtimeType}');
+          print('========== END $eventName EVENT (ERROR) ==========');
+          return;
+        }
+
+        // Check if this is a private message wrapper
+        if (message.containsKey('message') && message['message'] is Map) {
+          print('Unwrapping nested message from: $message');
+          message = Map<String, dynamic>.from(message['message']);
+          print('Unwrapped to: $message');
+        }
+
+        // Check if this is a room message
+        if (message.containsKey('room') &&
+            message.containsKey('message') &&
+            message['message'] is Map) {
+          print('Unwrapping room message from: $message');
+          message = Map<String, dynamic>.from(message['message']);
+          print('Unwrapped room message to: $message');
+        }
+
+        // Check if this is a 'to/from' format
+        if (message.containsKey('to') && message.containsKey('from')) {
+          print('Found to/from format message: $message');
+          // Create a standard format message
+          final content = message['content'] ?? message['message'] ?? '';
+          final timestamp =
+              message['timestamp'] ?? DateTime.now().toIso8601String();
+          message = {
+            'senderId': message['from'],
+            'receiverId': message['to'],
+            'content': content,
+            'timestamp': timestamp,
+          };
+          print('Converted to standard format: $message');
+        }
+
+        // Check for content field
+        if (!message.containsKey('content') &&
+            message.containsKey('message') &&
+            message['message'] is String) {
+          print('Converting message field to content: ${message['message']}');
+          message['content'] = message['message'];
+        }
+
+        // Check if we have the necessary fields
+        if (!message.containsKey('content') &&
+            !message.containsKey('message')) {
+          print('Message has no content or message field, skipping');
+          print('========== END $eventName EVENT (NO CONTENT) ==========');
+          return;
+        }
+
+        print('Processed message: $message');
+
+        if (onNewMessage != null) {
+          // Ensure the message has an ID to prevent duplicates
+          if (!message.containsKey('_id')) {
+            message['_id'] =
+                '${message['senderId'] ?? ''}_${message['content'] ?? message['message'] ?? ''}_${DateTime.now().millisecondsSinceEpoch}';
+            print('Generated message ID: ${message['_id']}');
+          }
+
+          print('Calling onNewMessage callback with message');
+          onNewMessage!(message);
+        } else {
+          print('No onNewMessage callback registered');
+        }
+
+        print('========== END $eventName EVENT ==========');
+      } catch (e) {
+        print('Error handling $eventName: $e');
+        print(e.toString());
+        print('========== END $eventName EVENT (ERROR) ==========');
+      }
+    });
   }
 
   void disconnectSocket() {
@@ -130,10 +303,12 @@ class ChatService {
         socket!.disconnect();
         socket!.dispose();
         socket = null;
+        _currentSocketUserId = null; // Clear the user ID
       }
     } catch (e) {
       print('Error disconnecting socket: $e');
       socket = null;
+      _currentSocketUserId = null; // Clear the user ID even on error
     }
   }
 
@@ -185,16 +360,26 @@ class ChatService {
         'Authorization': 'Bearer $token',
       };
 
+      // Use the correct endpoint with the defined constant
       final response = await http.get(
-        Uri.parse('$baseUrl/messages/$receiverId'), // Updated endpoint
+        Uri.parse('$baseUrl$getChatHistoryEndpoint$receiverId'),
         headers: headers,
       );
 
       print('Fetching messages - Status: ${response.statusCode}');
+      print(
+          'Fetching messages - URL: $baseUrl$getChatHistoryEndpoint$receiverId');
+      print('Fetching messages - Response: ${response.body}');
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return List<Map<String, dynamic>>.from(data);
+        final responseData = json.decode(response.body);
+        // Check if the response has the expected structure
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final List<dynamic> data = responseData['data'];
+          return List<Map<String, dynamic>>.from(data);
+        } else {
+          print('API response format unexpected: $responseData');
+        }
       }
 
       print('Failed to fetch messages, using mock data');
@@ -231,21 +416,24 @@ class ChatService {
           {
             'senderId': receiverId,
             'receiverId': userId,
-            'message': 'Hello! How can I help you today?',
-            'createdAt': yesterdayStr,
+            'content': 'Hello! How can I help you today?',
+            'timestamp': yesterdayStr,
+            '_id': 'mock_1',
           },
           {
             'senderId': userId,
             'receiverId': receiverId,
-            'message': 'Hi doctor, I have some questions about my livestock.',
-            'createdAt': yesterdayStr,
+            'content': 'Hi doctor, I have some questions about my livestock.',
+            'timestamp': yesterdayStr,
+            '_id': 'mock_2',
           },
           {
             'senderId': receiverId,
             'receiverId': userId,
-            'message':
+            'content':
                 'Sure, I\'d be happy to help. What specific concerns do you have?',
-            'createdAt': yesterdayStr,
+            'timestamp': yesterdayStr,
+            '_id': 'mock_3',
           },
         ];
       }
@@ -257,14 +445,83 @@ class ChatService {
   Future<Map<String, dynamic>> sendMessage(
       String receiverId, String content, String token, String userId) async {
     try {
+      print('========== SENDING MESSAGE VIA CHAT SERVICE ==========');
       final message = {
         'receiverId': receiverId,
-        'message': content,
+        'content': content,
       };
 
-      // Emit message through socket first
+      print('Sending message to $receiverId: $content');
+      print('Using endpoint: $baseUrl$sendMessageEndpoint');
+
+      // Make sure we're in a room with the receiver
       if (socket != null && socket!.connected) {
-        socket!.emit('sendMessage', message);
+        print('Socket is connected, sending message via socket');
+
+        // Join a chat room with the receiver - try multiple formats for compatibility
+        socket!.emit('join_chat', {
+          'userId': userId,
+          'receiverId': receiverId,
+        });
+
+        // Also try joining with just the IDs
+        socket!.emit('join_chat', '$userId-$receiverId');
+
+        // Also try reversed IDs
+        socket!.emit('join_chat', '$receiverId-$userId');
+
+        // And try the direct join format
+        socket!.emit('join', receiverId);
+
+        print('Joined chat room with receiver: $receiverId');
+
+        // Emit message through socket with all necessary fields
+        final socketMessage = {
+          'senderId': userId,
+          'receiverId': receiverId,
+          'content': content,
+          'timestamp': DateTime.now().toIso8601String(),
+        };
+
+        // Try all possible event names to ensure compatibility
+        socket!.emit('send_message', socketMessage);
+        socket!.emit('sendMessage', socketMessage);
+        socket!.emit('message', socketMessage);
+
+        // Also try the direct message format
+        socket!.emit(
+            'private_message', {'to': receiverId, 'message': socketMessage});
+
+        // Also try the room message format
+        final directRoom = '${userId}-${receiverId}';
+        final reverseRoom = '${receiverId}-${userId}';
+        final combinedRoom = [userId, receiverId]..sort();
+        final sortedRoom = combinedRoom.join('-');
+
+        socket!.emit(
+            'room_message', {'room': directRoom, 'message': socketMessage});
+        socket!.emit(
+            'room_message', {'room': reverseRoom, 'message': socketMessage});
+        socket!.emit(
+            'room_message', {'room': sortedRoom, 'message': socketMessage});
+
+        // Also try the chat message format
+        socket!.emit('chat_message', {
+          'senderId': userId,
+          'receiverId': receiverId,
+          'message': content,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+
+        // Also try simple text message
+        socket!.emit('message_text', content);
+
+        // Also try JSON string message
+        socket!.emit('message_json', json.encode(socketMessage));
+
+        print('Emitted message via socket: $socketMessage');
+      } else {
+        print('Socket not connected, skipping socket message');
       }
 
       // Try HTTP endpoint as fallback
@@ -274,19 +531,70 @@ class ChatService {
       };
 
       final response = await http.post(
-        Uri.parse('$baseUrl/messages'),
+        Uri.parse('$baseUrl$sendMessageEndpoint'),
         headers: headers,
         body: json.encode(message),
       );
 
-      if (response.statusCode == 201) {
-        return json.decode(response.body);
-      } else {
-        return await _storeMockMessage(receiverId, content, userId);
+      print('Send message response status: ${response.statusCode}');
+      print('Send message response body: ${response.body}');
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        if (responseData['success'] == true && responseData['data'] != null) {
+          // If we got a successful response, also emit this message via socket
+          // to ensure it's delivered in real-time
+          if (socket != null && socket!.connected) {
+            final serverMessage = responseData['data'];
+
+            // Emit with all possible event names
+            socket!.emit('receive_message', serverMessage);
+            socket!.emit('newMessage', serverMessage);
+            socket!.emit('message', serverMessage);
+
+            // Also try the private message format
+            socket!.emit('private_message',
+                {'to': receiverId, 'message': serverMessage});
+
+            // Also try the direct message format
+            socket!.emit('direct_message',
+                {'to': receiverId, 'from': userId, 'message': serverMessage});
+
+            // Also try the room message format
+            final directRoom = '${userId}-${receiverId}';
+            final reverseRoom = '${receiverId}-${userId}';
+            final combinedRoom = [userId, receiverId]..sort();
+            final sortedRoom = combinedRoom.join('-');
+
+            socket!.emit(
+                'room_message', {'room': directRoom, 'message': serverMessage});
+            socket!.emit('room_message',
+                {'room': reverseRoom, 'message': serverMessage});
+            socket!.emit(
+                'room_message', {'room': sortedRoom, 'message': serverMessage});
+
+            print('Re-emitted server message via socket: $serverMessage');
+          }
+
+          print(
+              '========== FINISHED SENDING MESSAGE VIA CHAT SERVICE ==========');
+          return responseData['data'];
+        }
       }
+
+      // If API call fails, use mock data
+      print('API call failed, using mock data');
+      final mockMessage = await _storeMockMessage(receiverId, content, userId);
+      print(
+          '========== FINISHED SENDING MESSAGE VIA CHAT SERVICE (MOCK) ==========');
+      return mockMessage;
     } catch (e) {
       print('Error sending message: $e');
-      return await _storeMockMessage(receiverId, content, userId);
+      print('Using mock data due to error');
+      final mockMessage = await _storeMockMessage(receiverId, content, userId);
+      print(
+          '========== FINISHED SENDING MESSAGE VIA CHAT SERVICE (ERROR) ==========');
+      return mockMessage;
     }
   }
 
@@ -301,12 +609,13 @@ class ChatService {
     final formattedDate =
         "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}T${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}.000Z";
 
-    // Create the message
+    // Create the message with the correct field names
     final message = {
       'senderId': userId,
       'receiverId': receiverId,
-      'message': content,
-      'createdAt': formattedDate,
+      'content': content,
+      'timestamp': formattedDate,
+      '_id': 'mock_${DateTime.now().millisecondsSinceEpoch}',
     };
 
     // Initialize the conversation if it doesn't exist
@@ -320,7 +629,54 @@ class ChatService {
 
     // Notify listeners if socket is connected
     if (socket != null && socket!.connected) {
+      print('Emitting mock message via socket with multiple formats');
+
+      // Format 1: Basic message formats
+      socket!.emit('receive_message', message);
       socket!.emit('newMessage', message);
+      socket!.emit('message', message);
+      print('Emitted with basic event names');
+
+      // Format 2: Private message format
+      socket!.emit('private_message', {'to': receiverId, 'message': message});
+      print('Emitted with private_message event');
+
+      // Format 3: Direct message format
+      socket!.emit('direct_message',
+          {'to': receiverId, 'from': userId, 'message': message});
+      print('Emitted with direct_message event');
+
+      // Format 4: Room message formats
+      final directRoom = '${userId}-${receiverId}';
+      final reverseRoom = '${receiverId}-${userId}';
+      final combinedRoom = [userId, receiverId]..sort();
+      final sortedRoom = combinedRoom.join('-');
+
+      socket!.emit('room_message', {'room': directRoom, 'message': message});
+      socket!.emit('room_message', {'room': reverseRoom, 'message': message});
+      socket!.emit('room_message', {'room': sortedRoom, 'message': message});
+      print('Emitted with room_message events');
+
+      // Format 5: Chat message format
+      socket!.emit('chat_message', {
+        'senderId': userId,
+        'receiverId': receiverId,
+        'message': content,
+        'timestamp': formattedDate,
+      });
+      print('Emitted with chat_message event');
+
+      // Format 6: Simple text message
+      socket!.emit('message_text', content);
+      print('Emitted simple text message');
+
+      // Format 7: JSON string message
+      socket!.emit('message_json', json.encode(message));
+      print('Emitted JSON string message');
+
+      print('Finished emitting mock message via socket');
+    } else {
+      print('Socket not connected, skipping socket emission');
     }
 
     return message;
@@ -461,16 +817,41 @@ class ChatService {
         'Authorization': 'Bearer $token',
       };
 
+      print('Fetching chats with token');
+      print('Using endpoint: $baseUrl$getDoctorChatsEndpoint');
+
       final response = await http.get(
-        Uri.parse('$baseUrl/chats'),
+        Uri.parse('$baseUrl$getDoctorChatsEndpoint'),
         headers: headers,
       );
 
       print('Fetching chats - Status: ${response.statusCode}');
+      print('Fetching chats - Response: ${response.body}');
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => ChatHistory.fromJson(json)).toList();
+        final responseData = json.decode(response.body);
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final List<dynamic> data = responseData['data'];
+          print('Successfully parsed ${data.length} chat histories');
+
+          // Process each chat history item
+          final List<ChatHistory> result = [];
+          for (var item in data) {
+            try {
+              final chatHistory = ChatHistory.fromJson(item);
+              print(
+                  'Processed chat history with user id: ${chatHistory.user.id}, name: ${chatHistory.user.name}');
+              result.add(chatHistory);
+            } catch (e) {
+              print('Error processing chat history item: $e');
+              print('Problematic item: $item');
+            }
+          }
+
+          return result;
+        } else {
+          print('API response format unexpected: $responseData');
+        }
       }
 
       // Return empty list if API fails
