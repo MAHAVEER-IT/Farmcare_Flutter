@@ -138,6 +138,10 @@ class ChatService {
         // Request pending messages
         socket!.emit('request_pending_messages', {'userId': userId});
         print('Requested pending messages');
+
+        // Force a direct connection to the server's socket namespace
+        socket!.emit('force_connect', {'userId': userId});
+        print('Forced direct connection to socket namespace');
       });
 
       // Listen for all possible message event names
@@ -150,6 +154,39 @@ class ChatService {
       _setupMessageListener('room_message');
       _setupMessageListener('message_text');
       _setupMessageListener('message_json');
+
+      // Add a special listener for any event (catch-all)
+      socket!.onAny((event, data) {
+        print('Received ANY event: $event');
+        print('Event data: $data');
+
+        // If this is a message-related event we're not explicitly handling, process it
+        if (event.toString().contains('message') && onNewMessage != null) {
+          try {
+            Map<String, dynamic> message;
+            if (data is Map) {
+              message = Map<String, dynamic>.from(data);
+            } else if (data is String) {
+              try {
+                message = json.decode(data);
+              } catch (e) {
+                message = {
+                  'content': data,
+                  'timestamp': DateTime.now().toIso8601String()
+                };
+              }
+            } else {
+              return; // Can't process this format
+            }
+
+            print('Processing unhandled message event: $event');
+            print('Message data: $message');
+            onNewMessage!(message);
+          } catch (e) {
+            print('Error processing unhandled message event: $e');
+          }
+        }
+      });
 
       socket!.on('getOnlineUsers', (data) {
         try {
@@ -443,13 +480,19 @@ class ChatService {
   }
 
   Future<Map<String, dynamic>> sendMessage(
-      String receiverId, String content, String token, String userId) async {
+      String receiverId, String content, String token, String userId,
+      [String? clientId]) async {
     try {
       print('========== SENDING MESSAGE VIA CHAT SERVICE ==========');
       final message = {
         'receiverId': receiverId,
         'content': content,
       };
+
+      // Add clientId if provided to help server deduplicate
+      if (clientId != null) {
+        message['clientId'] = clientId;
+      }
 
       print('Sending message to $receiverId: $content');
       print('Using endpoint: $baseUrl$sendMessageEndpoint');
@@ -483,43 +526,19 @@ class ChatService {
           'timestamp': DateTime.now().toIso8601String(),
         };
 
-        // Try all possible event names to ensure compatibility
-        socket!.emit('send_message', socketMessage);
-        socket!.emit('sendMessage', socketMessage);
-        socket!.emit('message', socketMessage);
+        // Add clientId if provided to help server deduplicate
+        if (clientId != null) {
+          socketMessage['clientId'] = clientId;
+        }
 
-        // Also try the direct message format
+        // Send with the most reliable format based on your server implementation
+        socket!.emit('send_message', socketMessage);
+        print('Emitted with send_message event');
+
+        // Also try the private message format as a backup
         socket!.emit(
             'private_message', {'to': receiverId, 'message': socketMessage});
-
-        // Also try the room message format
-        final directRoom = '${userId}-${receiverId}';
-        final reverseRoom = '${receiverId}-${userId}';
-        final combinedRoom = [userId, receiverId]..sort();
-        final sortedRoom = combinedRoom.join('-');
-
-        socket!.emit(
-            'room_message', {'room': directRoom, 'message': socketMessage});
-        socket!.emit(
-            'room_message', {'room': reverseRoom, 'message': socketMessage});
-        socket!.emit(
-            'room_message', {'room': sortedRoom, 'message': socketMessage});
-
-        // Also try the chat message format
-        socket!.emit('chat_message', {
-          'senderId': userId,
-          'receiverId': receiverId,
-          'message': content,
-          'timestamp': DateTime.now().toIso8601String(),
-        });
-
-        // Also try simple text message
-        socket!.emit('message_text', content);
-
-        // Also try JSON string message
-        socket!.emit('message_json', json.encode(socketMessage));
-
-        print('Emitted message via socket: $socketMessage');
+        print('Emitted with private_message event');
       } else {
         print('Socket not connected, skipping socket message');
       }
@@ -547,33 +566,9 @@ class ChatService {
           if (socket != null && socket!.connected) {
             final serverMessage = responseData['data'];
 
-            // Emit with all possible event names
+            // Emit with the most reliable format based on your server implementation
             socket!.emit('receive_message', serverMessage);
-            socket!.emit('newMessage', serverMessage);
-            socket!.emit('message', serverMessage);
-
-            // Also try the private message format
-            socket!.emit('private_message',
-                {'to': receiverId, 'message': serverMessage});
-
-            // Also try the direct message format
-            socket!.emit('direct_message',
-                {'to': receiverId, 'from': userId, 'message': serverMessage});
-
-            // Also try the room message format
-            final directRoom = '${userId}-${receiverId}';
-            final reverseRoom = '${receiverId}-${userId}';
-            final combinedRoom = [userId, receiverId]..sort();
-            final sortedRoom = combinedRoom.join('-');
-
-            socket!.emit(
-                'room_message', {'room': directRoom, 'message': serverMessage});
-            socket!.emit('room_message',
-                {'room': reverseRoom, 'message': serverMessage});
-            socket!.emit(
-                'room_message', {'room': sortedRoom, 'message': serverMessage});
-
-            print('Re-emitted server message via socket: $serverMessage');
+            print('Re-emitted server message via socket');
           }
 
           print(
@@ -584,14 +579,16 @@ class ChatService {
 
       // If API call fails, use mock data
       print('API call failed, using mock data');
-      final mockMessage = await _storeMockMessage(receiverId, content, userId);
+      final mockMessage =
+          await _storeMockMessage(receiverId, content, userId, clientId);
       print(
           '========== FINISHED SENDING MESSAGE VIA CHAT SERVICE (MOCK) ==========');
       return mockMessage;
     } catch (e) {
       print('Error sending message: $e');
       print('Using mock data due to error');
-      final mockMessage = await _storeMockMessage(receiverId, content, userId);
+      final mockMessage =
+          await _storeMockMessage(receiverId, content, userId, clientId);
       print(
           '========== FINISHED SENDING MESSAGE VIA CHAT SERVICE (ERROR) ==========');
       return mockMessage;
@@ -599,7 +596,8 @@ class ChatService {
   }
 
   Future<Map<String, dynamic>> _storeMockMessage(
-      String receiverId, String content, String userId) async {
+      String receiverId, String content, String userId,
+      [String? clientId]) async {
     // Create a unique conversation ID (combination of both user IDs)
     final conversationId = [userId, receiverId]..sort();
     final convId = conversationId.join('_');
@@ -615,8 +613,13 @@ class ChatService {
       'receiverId': receiverId,
       'content': content,
       'timestamp': formattedDate,
-      '_id': 'mock_${DateTime.now().millisecondsSinceEpoch}',
+      '_id': clientId ?? 'mock_${DateTime.now().millisecondsSinceEpoch}',
     };
+
+    // Add clientId if provided to help server deduplicate
+    if (clientId != null) {
+      message['clientId'] = clientId;
+    }
 
     // Initialize the conversation if it doesn't exist
     _mockMessages[convId] ??= [];
@@ -629,50 +632,15 @@ class ChatService {
 
     // Notify listeners if socket is connected
     if (socket != null && socket!.connected) {
-      print('Emitting mock message via socket with multiple formats');
+      print('Emitting mock message via socket');
 
-      // Format 1: Basic message formats
+      // Send with the most reliable format based on your server implementation
       socket!.emit('receive_message', message);
-      socket!.emit('newMessage', message);
-      socket!.emit('message', message);
-      print('Emitted with basic event names');
+      print('Emitted with receive_message event');
 
-      // Format 2: Private message format
+      // Also try the private message format as a backup
       socket!.emit('private_message', {'to': receiverId, 'message': message});
       print('Emitted with private_message event');
-
-      // Format 3: Direct message format
-      socket!.emit('direct_message',
-          {'to': receiverId, 'from': userId, 'message': message});
-      print('Emitted with direct_message event');
-
-      // Format 4: Room message formats
-      final directRoom = '${userId}-${receiverId}';
-      final reverseRoom = '${receiverId}-${userId}';
-      final combinedRoom = [userId, receiverId]..sort();
-      final sortedRoom = combinedRoom.join('-');
-
-      socket!.emit('room_message', {'room': directRoom, 'message': message});
-      socket!.emit('room_message', {'room': reverseRoom, 'message': message});
-      socket!.emit('room_message', {'room': sortedRoom, 'message': message});
-      print('Emitted with room_message events');
-
-      // Format 5: Chat message format
-      socket!.emit('chat_message', {
-        'senderId': userId,
-        'receiverId': receiverId,
-        'message': content,
-        'timestamp': formattedDate,
-      });
-      print('Emitted with chat_message event');
-
-      // Format 6: Simple text message
-      socket!.emit('message_text', content);
-      print('Emitted simple text message');
-
-      // Format 7: JSON string message
-      socket!.emit('message_json', json.encode(message));
-      print('Emitted JSON string message');
 
       print('Finished emitting mock message via socket');
     } else {
@@ -861,5 +829,17 @@ class ChatService {
       print('Error fetching chats: $e');
       return [];
     }
+  }
+
+  /// Checks if the socket is connected
+  bool isSocketConnected() {
+    if (socket == null) {
+      print('Socket is null, not connected');
+      return false;
+    }
+
+    final connected = socket!.connected;
+    print('Socket connection status: $connected');
+    return connected;
   }
 }

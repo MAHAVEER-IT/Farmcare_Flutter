@@ -528,6 +528,7 @@ class _DoctorsPageState extends State<DoctorsPage> {
           receiverName: receiverName,
           currentUserId: widget.currentUserId,
           token: widget.token,
+          chatService: _chatService,
         ),
       ),
     );

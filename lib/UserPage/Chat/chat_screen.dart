@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:farmcare/services/chat_service.dart';
 import 'package:farmcare/utils/app_localizations.dart';
@@ -7,12 +8,14 @@ import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:http/http.dart' as http;
 
 class ChatScreen extends StatefulWidget {
   final String receiverId;
   final String receiverName;
   final String currentUserId;
   final String token;
+  final ChatService chatService;
 
   const ChatScreen({
     Key? key,
@@ -20,6 +23,7 @@ class ChatScreen extends StatefulWidget {
     required this.receiverName,
     required this.currentUserId,
     required this.token,
+    required this.chatService,
   }) : super(key: key);
 
   @override
@@ -27,7 +31,6 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final ChatService _chatService = ChatService();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   List<Map<String, dynamic>> _messages = [];
@@ -38,10 +41,19 @@ class _ChatScreenState extends State<ChatScreen> {
   late IO.Socket socket;
   bool _isConnected = false;
   bool _isSending = false;
+  String? _lastMessageTimestamp;
+  final Random _random = Random();
 
   @override
   void initState() {
     super.initState();
+
+    // Register callback for new messages from ChatService
+    widget.chatService.onNewMessage = (message) {
+      print('Received message from ChatService: $message');
+      _handleIncomingMessage(message);
+    };
+
     _initSocket();
     _loadMessages();
 
@@ -52,6 +64,9 @@ class _ChatScreenState extends State<ChatScreen> {
           print('Periodic reconnection check - reconnecting socket');
           socket.connect();
         }
+
+        // Also periodically poll for new messages as a fallback
+        _pollForNewMessages();
       } else {
         timer.cancel();
       }
@@ -88,7 +103,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _joinChatRooms();
 
         // Also connect the ChatService socket to ensure both are connected
-        _chatService.connectSocket(widget.currentUserId);
+        widget.chatService.connectSocket(widget.currentUserId);
 
         // Request server to send any pending messages
         socket.emit('request_pending_messages',
@@ -358,18 +373,55 @@ class _ChatScreenState extends State<ChatScreen> {
       print('Message content: $content');
 
       // Ensure the message has an ID to prevent duplicates
-      if (!message.containsKey('_id')) {
-        message['_id'] =
-            '${message['senderId'] ?? ''}_${message['content'] ?? message['message'] ?? ''}_${DateTime.now().millisecondsSinceEpoch}';
-        print('Generated message ID: ${message['_id']}');
+      String messageId;
+      if (message.containsKey('_id')) {
+        messageId = message['_id'].toString();
+      } else if (message.containsKey('clientId')) {
+        messageId = message['clientId'].toString();
+      } else {
+        // Generate a consistent ID based on content and sender
+        messageId =
+            '${message['senderId'] ?? ''}_${message['content'] ?? message['message'] ?? ''}_${message['timestamp'] ?? DateTime.now().millisecondsSinceEpoch}';
+        message['_id'] = messageId;
       }
+      print('Using message ID: $messageId');
 
-      // Check if we've already processed this message
-      final messageId = message['_id'];
+      // Check if we've already processed this message by ID
       if (_processedMessageIds.contains(messageId)) {
         print('Message with ID $messageId already processed, ignoring');
         print(
-            '========== END HANDLING INCOMING MESSAGE (DUPLICATE) ==========');
+            '========== END HANDLING INCOMING MESSAGE (DUPLICATE ID) ==========');
+        return;
+      }
+
+      // Also check for duplicates based on content and timestamp
+      // This helps catch messages that might have different IDs but are actually the same
+      final timestamp = message['timestamp'] ?? message['createdAt'] ?? '';
+      bool isDuplicate = false;
+
+      for (final existingMessage in _messages) {
+        final existingContent =
+            existingMessage['content'] ?? existingMessage['message'] ?? '';
+        final existingTimestamp =
+            existingMessage['timestamp'] ?? existingMessage['createdAt'] ?? '';
+        final existingSender = existingMessage['senderId'] ?? '';
+
+        // If content, sender and timestamp are very close, it's likely a duplicate
+        if (existingContent == content &&
+            existingSender == senderId &&
+            _isTimestampClose(
+                existingTimestamp.toString(), timestamp.toString())) {
+          isDuplicate = true;
+          print('Found duplicate message based on content and timestamp');
+          print('Existing message: $existingMessage');
+          print('New message: $message');
+          break;
+        }
+      }
+
+      if (isDuplicate) {
+        print(
+            '========== END HANDLING INCOMING MESSAGE (DUPLICATE CONTENT) ==========');
         return;
       }
 
@@ -401,6 +453,23 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // Helper method to check if two timestamps are close (within 2 seconds)
+  bool _isTimestampClose(String timestamp1, String timestamp2) {
+    try {
+      final date1 = DateTime.parse(timestamp1);
+      final date2 = DateTime.parse(timestamp2);
+
+      // Calculate the difference in seconds
+      final difference = date1.difference(date2).inSeconds.abs();
+
+      // If the timestamps are within 2 seconds, consider them close
+      return difference <= 2;
+    } catch (e) {
+      print('Error comparing timestamps: $e');
+      return false;
+    }
+  }
+
   Future<void> _loadMessages() async {
     try {
       setState(() {
@@ -408,7 +477,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       final messages =
-          await _chatService.getMessages(widget.receiverId, widget.token);
+          await widget.chatService.getMessages(widget.receiverId, widget.token);
 
       if (mounted) {
         setState(() {
@@ -416,11 +485,28 @@ class _ChatScreenState extends State<ChatScreen> {
           _messages = [];
           _processedMessageIds.clear();
 
+          // Find the newest message timestamp
+          String? newestTimestamp;
           for (final message in messages) {
             final messageId = message['_id'] ??
                 '${message['senderId']}_${message['content'] ?? message['message']}_${message['timestamp'] ?? message['createdAt']}';
             _processedMessageIds.add(messageId);
             _messages.add(message);
+
+            // Track the newest timestamp
+            final timestamp = message['timestamp'] ?? message['createdAt'];
+            if (timestamp != null) {
+              if (newestTimestamp == null ||
+                  timestamp.toString().compareTo(newestTimestamp) > 0) {
+                newestTimestamp = timestamp.toString();
+              }
+            }
+          }
+
+          // Initialize the last message timestamp
+          _lastMessageTimestamp = newestTimestamp;
+          if (_lastMessageTimestamp != null) {
+            print('Initialized last message timestamp: $_lastMessageTimestamp');
           }
 
           _isLoading = false;
@@ -470,229 +556,202 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     // Check ChatService socket
-    if (_chatService.socket == null || !_chatService.socket!.connected) {
+    if (widget.chatService.socket == null ||
+        !widget.chatService.socket!.connected) {
       print('ChatService socket disconnected, reconnecting...');
-      _chatService.connectSocket(widget.currentUserId);
+      widget.chatService.connectSocket(widget.currentUserId);
     }
   }
 
   Future<void> _sendMessage() async {
-    try {
-      print('========== SENDING MESSAGE ==========');
+    if (_messageController.text.trim().isEmpty) {
+      print('Message content is empty, not sending');
+      return;
+    }
 
-      // Get the message content
-      final messageContent = _messageController.text.trim();
+    final content = _messageController.text.trim();
+    print('Sending message: $content');
 
-      // Check if the message is empty
-      if (messageContent.isEmpty) {
-        print('Message is empty, not sending');
-        print('========== FINISHED SENDING MESSAGE (EMPTY) ==========');
-        return;
-      }
+    // Create a unique client ID for this message to prevent duplicates
+    final clientId =
+        '${widget.currentUserId}_${DateTime.now().millisecondsSinceEpoch}_${_random.nextInt(10000)}';
+    print('Generated clientId: $clientId');
 
-      print('Sending message: $messageContent');
-      print('From: ${widget.currentUserId} to: ${widget.receiverId}');
+    // Create a message object
+    final message = {
+      'senderId': widget.currentUserId,
+      'receiverId': widget.receiverId,
+      'content': content,
+      'timestamp': DateTime.now().toIso8601String(),
+      'clientId': clientId,
+      '_id': clientId, // Use the same ID locally to help with deduplication
+    };
 
-      // Clear the text field
+    // Add the message to the UI immediately
+    setState(() {
+      _messages.add(message);
+      _isSending = true;
       _messageController.clear();
+    });
 
-      // Check socket connections before sending
-      _checkSocketConnections();
+    // Scroll to the bottom
+    _scrollToBottom();
 
-      // Show reconnection message if socket is not connected
-      if (!_isConnected) {
-        print('Socket not connected, showing reconnection message');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Connection lost. Trying to reconnect...')),
+    // Check if socket is connected
+    bool socketConnected = false;
+    try {
+      socketConnected = widget.chatService.isSocketConnected();
+      print('Socket connected: $socketConnected');
+    } catch (e) {
+      print('Error checking socket connection: $e');
+    }
+
+    // Try to send via socket first
+    if (socketConnected) {
+      try {
+        print('Attempting to send message via socket');
+        // Send the message through the socket
+        await widget.chatService.sendMessage(
+          widget.receiverId,
+          content,
+          widget.token,
+          widget.currentUserId,
+          clientId, // Pass the clientId to prevent duplicates
         );
-        socket.connect();
-        _chatService.connectSocket(widget.currentUserId);
 
-        // Wait a moment for connection to establish
-        await Future.delayed(Duration(milliseconds: 300));
-      }
-
-      // Create a temporary message ID
-      final tempMessageId =
-          '${widget.currentUserId}_${messageContent}_${DateTime.now().millisecondsSinceEpoch}';
-
-      // Create a message object
-      final message = {
-        '_id': tempMessageId,
-        'senderId': widget.currentUserId,
-        'receiverId': widget.receiverId,
-        'content': messageContent,
-        'timestamp': DateTime.now().toIso8601String(),
-        'isSending': true, // Mark as sending for UI
-      };
-
-      print('Created message object: $message');
-
-      // Add the message to the UI immediately
-      setState(() {
-        _messages.add(message);
-        _processedMessageIds.add(tempMessageId);
-        _isSending = true;
-      });
-
-      // Scroll to the bottom
-      _scrollToBottom();
-      print('Added message to UI and scrolled to bottom');
-
-      // Try joining the room again before sending
-      _joinChatRooms();
-
-      // Try multiple message formats to ensure delivery
-      print('Emitting message through socket with multiple formats');
-
-      // Format 1: Basic message
-      socket.emit('send_message', message);
-      print('Emitted with send_message event');
-
-      // Format 2: Alternative event name
-      socket.emit('sendMessage', message);
-      print('Emitted with sendMessage event');
-
-      // Format 3: Generic message event
-      socket.emit('message', message);
-      print('Emitted with message event');
-
-      // Format 4: Private message format
-      socket.emit(
-          'private_message', {'to': widget.receiverId, 'message': message});
-      print('Emitted with private_message event');
-
-      // Format 5: Direct message format
-      socket.emit('direct_message', {
-        'to': widget.receiverId,
-        'from': widget.currentUserId,
-        'message': message
-      });
-      print('Emitted with direct_message event');
-
-      // Format 6: Room message format
-      final directRoom = '${widget.currentUserId}-${widget.receiverId}';
-      final reverseRoom = '${widget.receiverId}-${widget.currentUserId}';
-      final combinedRoom = [widget.currentUserId, widget.receiverId]..sort();
-      final sortedRoom = combinedRoom.join('-');
-
-      socket.emit('room_message', {'room': directRoom, 'message': message});
-      print('Emitted room_message to room: $directRoom');
-
-      socket.emit('room_message', {'room': reverseRoom, 'message': message});
-      print('Emitted room_message to room: $reverseRoom');
-
-      socket.emit('room_message', {'room': sortedRoom, 'message': message});
-      print('Emitted room_message to room: $sortedRoom');
-
-      // Also try with underscores
-      socket.emit('room_message',
-          {'room': directRoom.replaceAll('-', '_'), 'message': message});
-      socket.emit('room_message',
-          {'room': reverseRoom.replaceAll('-', '_'), 'message': message});
-      socket.emit('room_message',
-          {'room': sortedRoom.replaceAll('-', '_'), 'message': message});
-
-      // Format 7: Chat message format
-      socket.emit('chat_message', {
-        'senderId': widget.currentUserId,
-        'receiverId': widget.receiverId,
-        'message': messageContent,
-        'timestamp': DateTime.now().toIso8601String(),
-      });
-      print('Emitted with chat_message event');
-
-      // Format 8: Simple text message
-      socket.emit('message_text', messageContent);
-      print('Emitted simple text message');
-
-      // Format 9: JSON string message
-      socket.emit('message_json', json.encode(message));
-      print('Emitted JSON string message');
-
-      print('Finished emitting message via socket');
-
-      // Ensure ChatService socket is connected before sending
-      if (_chatService.socket == null || !_chatService.socket!.connected) {
-        print('ChatService socket not connected, reconnecting...');
-        _chatService.connectSocket(widget.currentUserId);
-
-        // Wait a moment for connection to establish
-        await Future.delayed(Duration(milliseconds: 300));
-      }
-
-      // Also send via HTTP as fallback
-      print('Sending message via HTTP as fallback');
-      _chatService
-          .sendMessage(
-        widget.receiverId,
-        messageContent,
-        widget.token,
-        widget.currentUserId,
-      )
-          .then((result) {
-        print('HTTP message send successful, result: $result');
-
-        // If we got a real ID back from the server, update our message
-        if (result != null && result['_id'] != null) {
-          // Add the server ID to processed IDs
-          _processedMessageIds.add(result['_id']);
-          print('Added server message ID to processed IDs: ${result['_id']}');
-
-          // Update the message in the UI with the server ID
-          setState(() {
-            for (int i = 0; i < _messages.length; i++) {
-              if (_messages[i]['_id'] == tempMessageId) {
-                _messages[i]['_id'] = result['_id'];
-                _messages[i]['isSending'] = false;
-                break;
-              }
-            }
-          });
-        }
-
-        // Clear sending state after a delay
-        Future.delayed(Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() {
-              _isSending = false;
-
-              // Update all messages that are still marked as sending
-              for (int i = 0; i < _messages.length; i++) {
-                if (_messages[i]['isSending'] == true) {
-                  _messages[i]['isSending'] = false;
-                }
-              }
-            });
-          }
-        });
-      }).catchError((error) {
-        print('HTTP message send failed: $error');
-
-        // Clear sending state on error
+        print('Message sent via socket successfully');
         setState(() {
           _isSending = false;
         });
-      });
+        return; // If socket send succeeds, don't try HTTP
+      } catch (e) {
+        print('Error sending message via socket: $e');
+        // Continue to HTTP fallback
+      }
+    }
 
-      print('========== FINISHED SENDING MESSAGE ==========');
+    // Fallback to HTTP if socket fails or is not connected
+    try {
+      print('Attempting to send message via HTTP');
+
+      // Make a direct HTTP call to send the message
+      final response = await http.post(
+        Uri.parse(
+            'https://farmcare-backend-new.onrender.com/api/v1/message/send'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${widget.token}',
+        },
+        body: json.encode({
+          'receiverId': widget.receiverId,
+          'content': content,
+          'clientId': clientId, // Include clientId to prevent duplicates
+        }),
+      );
+
+      print('HTTP response status: ${response.statusCode}');
+      print('HTTP response body: ${response.body}');
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        print('Message sent via HTTP successfully');
+
+        // Try to parse the response to get the server's message ID
+        try {
+          final responseData = json.decode(response.body);
+          if (responseData.containsKey('_id')) {
+            // Update our local message with the server's ID
+            for (int i = 0; i < _messages.length; i++) {
+              if (_messages[i]['clientId'] == clientId) {
+                setState(() {
+                  _messages[i]['_id'] = responseData['_id'];
+                  _processedMessageIds
+                      .add(responseData['_id']); // Add to processed IDs
+                });
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          print('Error parsing HTTP response: $e');
+        }
+
+        // Also send a notification to ensure the receiver gets it
+        try {
+          await http.post(
+            Uri.parse(
+                'https://farmcare-backend-new.onrender.com/api/v1/notification'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ${widget.token}',
+            },
+            body: json.encode({
+              'receiverId': widget.receiverId,
+              'type': 'message',
+              'content': content,
+              'senderId': widget.currentUserId,
+              'clientId': clientId, // Include clientId to prevent duplicates
+            }),
+          );
+          print('Notification sent successfully');
+        } catch (e) {
+          print('Error sending notification: $e');
+        }
+      } else {
+        print(
+            'Failed to send message via HTTP: ${response.statusCode} ${response.body}');
+      }
     } catch (e) {
-      print('Error sending message: $e');
-      print(e.toString());
-
-      // Clear sending state on error
+      print('Error sending message via HTTP: $e');
+    } finally {
       setState(() {
         _isSending = false;
       });
+    }
+  }
 
-      // Show error message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to send message: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+  void _pollForNewMessages() async {
+    try {
+      print('Polling for new messages...');
+      final messages =
+          await widget.chatService.getMessages(widget.receiverId, widget.token);
+
+      if (!mounted) return;
+
+      // Find the newest message timestamp
+      String? newestTimestamp;
+      for (final message in messages) {
+        final timestamp = message['timestamp'] ?? message['createdAt'];
+        if (timestamp != null) {
+          if (newestTimestamp == null ||
+              timestamp.toString().compareTo(newestTimestamp) > 0) {
+            newestTimestamp = timestamp.toString();
+          }
+        }
+      }
+
+      // If we have a new timestamp, process new messages
+      if (newestTimestamp != null &&
+          (_lastMessageTimestamp == null ||
+              newestTimestamp.compareTo(_lastMessageTimestamp!) > 0)) {
+        print('Found newer messages in poll, processing...');
+
+        // Process only new messages
+        for (final message in messages) {
+          final timestamp = message['timestamp'] ?? message['createdAt'];
+          if (timestamp != null &&
+              _lastMessageTimestamp != null &&
+              timestamp.toString().compareTo(_lastMessageTimestamp!) > 0) {
+            _handleIncomingMessage(message);
+          }
+        }
+
+        // Update the last timestamp
+        _lastMessageTimestamp = newestTimestamp;
+      } else {
+        print('No new messages found in poll');
+      }
+    } catch (e) {
+      print('Error polling for messages: $e');
     }
   }
 
@@ -1124,7 +1183,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    _chatService.disconnectSocket();
+    widget.chatService.disconnectSocket();
     socket.disconnect();
     socket.dispose();
     super.dispose();

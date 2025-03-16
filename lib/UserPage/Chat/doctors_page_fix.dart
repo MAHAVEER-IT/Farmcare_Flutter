@@ -34,6 +34,9 @@ void openChat(
     return;
   }
 
+  // Create a ChatService instance
+  final chatService = chat_service.ChatService();
+
   Navigator.push(
     context,
     MaterialPageRoute(
@@ -42,6 +45,7 @@ void openChat(
         receiverName: receiverName,
         currentUserId: currentUserId,
         token: token,
+        chatService: chatService,
       ),
     ),
   );
