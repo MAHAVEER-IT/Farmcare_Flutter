@@ -223,7 +223,7 @@ class _RegisterPageState extends State<RegisterPage> {
           SizedBox(height: 10),
           _textAnimation
               ? Text(
-                  "FarmSync",
+                  "Sow&Grow",
                   style: TextStyle(
                     fontSize: 36,
                     fontWeight: FontWeight.bold,

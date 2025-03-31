@@ -46,9 +46,9 @@ class CreateBlogService {
 
       // Validate file size
       final length = await imageFile.length();
-      if (length > 10 * 1024 * 1024) {
+      if (length > 5 * 1024 * 1024) {
         throw Exception(
-            'Image size too large. Please choose an image under 10MB.');
+            'Image size too large. Please choose an image under 5MB.');
       }
 
       // Validate file type
@@ -56,6 +56,11 @@ class CreateBlogService {
       if (mimeType == null || !mimeType.startsWith('image/')) {
         throw Exception('Invalid file type. Please choose an image file.');
       }
+
+      print('Starting image upload...');
+      print('File path: ${imageFile.path}');
+      print('File size: ${length / 1024 / 1024}MB');
+      print('MIME type: $mimeType');
 
       // Create upload request
       final uri = Uri.parse('$baseUrl/photos/upload');
@@ -73,6 +78,9 @@ class CreateBlogService {
       );
       request.files.add(multipartFile);
 
+      print('Sending request to: $uri');
+      print('Headers: $headers');
+
       // Send request with timeout
       final streamedResponse = await request.send().timeout(
         const Duration(seconds: 30),
@@ -83,11 +91,19 @@ class CreateBlogService {
 
       // Get response
       final response = await http.Response.fromStream(streamedResponse);
+      print('Response status code: ${response.statusCode}');
+      print('Response body: ${response.body}');
 
       if (response.statusCode == 201) {
         final data = json.decode(response.body);
         if (data['imageUrl'] != null) {
-          return data['imageUrl'];
+          // Handle both local and Cloudinary URLs
+          String imageUrl = data['imageUrl'];
+          if (!imageUrl.startsWith('http')) {
+            imageUrl = 'https://farmer-backend-r34r.onrender.com' + imageUrl;
+          }
+          print('Upload successful. Image URL: $imageUrl');
+          return imageUrl;
         }
         throw Exception('No image URL in response');
       }
@@ -155,9 +171,7 @@ class CreateBlogService {
           'authorName': authorName,
           'title': title,
           'content': content,
-          'images': imageUrl != null
-              ? ["https://farmcare-backend-new.onrender.com" + imageUrl]
-              : [],
+          'images': imageUrl != null ? [imageUrl] : [],
           'postType': 'farmUpdate',
           'createdAt': DateTime.now().toIso8601String(),
         }),

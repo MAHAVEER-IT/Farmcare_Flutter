@@ -11,6 +11,8 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+.farmcare_backend_new/
+farmcare_backend_new/
 
 # IntelliJ related
 *.iml

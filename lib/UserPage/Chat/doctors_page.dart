@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/channel_service.dart';
-import '../../services/doctor_service.dart' as doc_service;
 import '../../services/chat_service.dart' as chat_service;
+import '../../services/doctor_service.dart' as doc_service;
 import 'channel_screen.dart';
 import 'chat_screen.dart';
 
@@ -37,6 +37,8 @@ class _DoctorsPageState extends State<DoctorsPage> {
       _loadChatHistory();
     }
   }
+
+  String phoneNumber = '';
 
   Future<void> _loadChatHistory() async {
     try {
@@ -345,6 +347,7 @@ class _DoctorsPageState extends State<DoctorsPage> {
           itemCount: doctors.length,
           itemBuilder: (context, index) {
             final doctor = doctors[index];
+            phoneNumber = doctor.phone;
             return Container(
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
@@ -478,12 +481,22 @@ class _DoctorsPageState extends State<DoctorsPage> {
     } else if (user is doc_service.Doctor) {
       print('User is a Doctor object with id: ${user.id}');
       print('User name: ${user.name}');
+      print('Phone number: ${user.phone}');
+      phoneNumber = user.phone;
     } else {
       print('User is not a ChatUser or Doctor object: ${user.runtimeType}');
       // Try to access properties dynamically
       try {
         print('Trying to access id property: ${user.id}');
         print('Trying to access name property: ${user.name}');
+        try {
+          print('Trying to access phone property: ${user.phone}');
+          if (user.phone != null) {
+            phoneNumber = user.phone;
+          }
+        } catch (e) {
+          print('Phone property not available: $e');
+        }
       } catch (e) {
         print('Error accessing properties: $e');
       }
@@ -492,24 +505,34 @@ class _DoctorsPageState extends State<DoctorsPage> {
     // Extract the user ID and validate it
     String receiverId = '';
     String receiverName = 'Unknown User';
+    String receiverPhone = phoneNumber;
 
     if (user is doc_service.Doctor) {
       receiverId = user.id;
       receiverName = user.name;
+      receiverPhone = user.phone;
     } else if (user is chat_service.ChatUser) {
       receiverId = user.id;
       receiverName = user.name;
+      // ChatUser doesn't have a phone property
     } else if (user != null) {
       try {
         receiverId = user.id ?? '';
         receiverName = user.name ?? 'Unknown User';
+        try {
+          if (user.phone != null) {
+            receiverPhone = user.phone;
+          }
+        } catch (e) {
+          print('Phone property not available for this user type: $e');
+        }
       } catch (e) {
         print('Error extracting id/name from user: $e');
       }
     }
 
     print(
-        'Opening chat with receiverId: $receiverId, receiverName: $receiverName');
+        'Opening chat with receiverId: $receiverId, receiverName: $receiverName, receiverPhone: $receiverPhone');
 
     // Validate that we have a non-empty receiverId
     if (receiverId.isEmpty) {
@@ -526,6 +549,7 @@ class _DoctorsPageState extends State<DoctorsPage> {
         builder: (context) => ChatScreen(
           receiverId: receiverId,
           receiverName: receiverName,
+          receiverPhone: receiverPhone,
           currentUserId: widget.currentUserId,
           token: widget.token,
           chatService: _chatService,

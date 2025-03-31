@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:mime/mime.dart';
+import 'package:http_parser/http_parser.dart';
 
 class ChatUser {
   final String id;
@@ -841,5 +843,117 @@ class ChatService {
     final connected = socket!.connected;
     print('Socket connection status: $connected');
     return connected;
+  }
+
+  // Add new method for image upload
+  Future<String> uploadChatImage(File imageFile) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      if (token == null) {
+        throw Exception('Not authenticated');
+      }
+
+      // Validate file exists
+      if (!await imageFile.exists()) {
+        throw Exception('Image file not found');
+      }
+
+      // Validate file size (5MB limit)
+      final length = await imageFile.length();
+      if (length > 5 * 1024 * 1024) {
+        throw Exception(
+            'Image size too large. Please choose an image under 5MB.');
+      }
+
+      // Validate file type
+      final mimeType = lookupMimeType(imageFile.path);
+      if (mimeType == null || !mimeType.startsWith('image/')) {
+        throw Exception('Invalid file type. Please choose an image file.');
+      }
+
+      // Create upload request
+      final uri = Uri.parse('$baseUrl/photos/upload');
+      final request = http.MultipartRequest('POST', uri)
+        ..headers.addAll({
+          'Authorization':
+              token.startsWith('Bearer ') ? token : 'Bearer $token',
+          'Accept': 'application/json',
+        });
+
+      // Add file to request
+      final stream = http.ByteStream(imageFile.openRead());
+      final multipartFile = http.MultipartFile(
+        'image',
+        stream,
+        length,
+        filename: imageFile.path.split('/').last,
+        contentType: MediaType(mimeType.split('/')[0], mimeType.split('/')[1]),
+      );
+      request.files.add(multipartFile);
+
+      // Send request
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 201) {
+        final data = json.decode(response.body);
+        if (data['imageUrl'] != null) {
+          return data['imageUrl'];
+        }
+        throw Exception('No image URL in response');
+      }
+
+      throw Exception('Failed to upload image: ${response.statusCode}');
+    } catch (e) {
+      print('Image upload error: $e');
+      rethrow;
+    }
+  }
+
+  // Add new method for sending image message
+  Future<Map<String, dynamic>> sendImageMessage({
+    required String receiverId,
+    required File imageFile,
+  }) async {
+    try {
+      // First upload the image
+      final imageUrl = await uploadChatImage(imageFile);
+
+      // Then send the message with the image URL
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      if (token == null) {
+        throw Exception('Not authenticated');
+      }
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/message/send'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization':
+              token.startsWith('Bearer ') ? token : 'Bearer $token',
+        },
+        body: json.encode({
+          'receiverId': receiverId,
+          'content': imageUrl,
+          'messageType': 'image',
+          'type': 'image',
+        }),
+      );
+
+      if (response.statusCode == 201) {
+        final data = json.decode(response.body);
+        if (data is Map) {
+          data['messageType'] = 'image';
+        }
+        return {'success': true, 'data': data};
+      }
+
+      throw Exception('Failed to send image message: ${response.statusCode}');
+    } catch (e) {
+      print('Send image message error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
   }
 }

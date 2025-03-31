@@ -45,10 +45,10 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
         final file = File(image.path);
         final size = await file.length();
 
-        // Check file size (10MB limit)
-        if (size > 10 * 1024 * 1024) {
+        // Check file size (5MB limit)
+        if (size > 5 * 1024 * 1024) {
           setState(() {
-            _imageError = 'Image size should be less than 10MB';
+            _imageError = 'Image size should be less than 5MB';
           });
           return;
         }

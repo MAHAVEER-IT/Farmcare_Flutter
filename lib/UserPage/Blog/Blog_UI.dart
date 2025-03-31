@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/weather_service.dart';
+import 'Weather_detail.dart';
 
 class BlogPost {
   final String id;
@@ -264,25 +265,35 @@ class _BlogState extends State<Blog> {
               ),
             ),
             if (_weatherData != null)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.network(
-                    _weatherService.getWeatherIcon(_weatherData!['icon']),
-                    width: 40,
-                    height: 40,
-                    errorBuilder: (_, __, ___) =>
-                        Icon(Icons.cloud, color: Colors.white),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${_weatherData!['temp']}°C',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => WeatherDetail(),
                     ),
-                  ),
-                ],
+                  );
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.network(
+                      _weatherService.getWeatherIcon(_weatherData!['icon']),
+                      width: 40,
+                      height: 40,
+                      errorBuilder: (_, __, ___) =>
+                          Icon(Icons.cloud, color: Colors.white),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${_weatherData!['temp']}°C',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
               ),
           ],
         ),

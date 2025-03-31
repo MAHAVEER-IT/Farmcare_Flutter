@@ -1,18 +1,24 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:farmcare/services/chat_service.dart';
 import 'package:farmcare/utils/app_localizations.dart';
 import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:mime/mime.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 class ChatScreen extends StatefulWidget {
   final String receiverId;
   final String receiverName;
+  final String receiverPhone;
   final String currentUserId;
   final String token;
   final ChatService chatService;
@@ -21,6 +27,7 @@ class ChatScreen extends StatefulWidget {
     Key? key,
     required this.receiverId,
     required this.receiverName,
+    required this.receiverPhone,
     required this.currentUserId,
     required this.token,
     required this.chatService,
@@ -43,6 +50,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isSending = false;
   String? _lastMessageTimestamp;
   final Random _random = Random();
+  bool _isUploadingImage = false;
 
   @override
   void initState() {
@@ -759,6 +767,110 @@ class _ChatScreenState extends State<ChatScreen> {
     return _onlineUsers.contains(widget.receiverId);
   }
 
+  // Update _launchDialer method:
+  Future<void> _launchDialer(String phoneNumber) async {
+    final cleanedNumber = phoneNumber.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (cleanedNumber.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invalid phone number')),
+      );
+      return;
+    }
+
+    final Uri phoneLaunchUri = Uri(scheme: 'tel', path: cleanedNumber);
+
+    if (await Permission.phone.request().isGranted) {
+      if (await canLaunchUrl(phoneLaunchUri)) {
+        await launchUrl(phoneLaunchUri);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch dialer')),
+        );
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Phone permission denied')),
+      );
+    }
+  }
+
+  // Add image picker method
+  Future<void> _pickAndSendImage() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image != null) {
+        setState(() => _isUploadingImage = true);
+
+        final file = File(image.path);
+        final size = await file.length();
+
+        // Check file size (5MB limit)
+        if (size > 5 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Image size should be less than 5MB'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+
+        // Check file type
+        final mimeType = lookupMimeType(image.path);
+        if (!mimeType!.startsWith('image/')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please select an image file'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+
+        // Send image message
+        final response = await widget.chatService.sendImageMessage(
+          receiverId: widget.receiverId,
+          imageFile: file,
+        );
+
+        if (!mounted) return;
+
+        if (response['success'] == true) {
+          final message = response['data'];
+          _handleIncomingMessage(message);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to send image: ${response['message']}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error picking/sending image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error sending image: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUploadingImage = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final languageProvider = Provider.of<LanguageProvider>(context);
@@ -802,6 +914,18 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            onPressed: () async {
+              if (widget.receiverPhone.isNotEmpty) {
+                await _launchDialer(widget.receiverPhone);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('No phone number available')),
+                );
+              }
+            },
+            icon: Icon(Icons.phone),
+          ),
           if (!_isConnected)
             IconButton(
               icon: Icon(Icons.refresh, color: Colors.white),
@@ -1022,73 +1146,129 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildMessageBubble(Map<String, dynamic> message) {
     final isMe = message['senderId'] == widget.currentUserId;
-    final isSending = isMe && _isSending && !message.containsKey('_id');
+    // Check both messageType and content URL pattern for images
+    final isImage = message['messageType'] == 'image' ||
+        (message['content'] is String &&
+            (message['content'].toString().contains('cloudinary.com') ||
+                message['content']
+                    .toString()
+                    .toLowerCase()
+                    .contains('/image/')));
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: EdgeInsets.only(
-          bottom: 12,
-          left: isMe ? 64 : 0,
-          right: isMe ? 0 : 64,
-        ),
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isMe ? Colors.green.shade800 : Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(isMe ? 16 : 4),
-            topRight: Radius.circular(isMe ? 4 : 16),
-            bottomLeft: Radius.circular(16),
-            bottomRight: Radius.circular(16),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: Offset(0, 2),
-            ),
-          ],
+          color: isMe ? Colors.green.shade100 : Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(12),
         ),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              message['content'] ?? message['message'] ?? '',
-              style: TextStyle(
-                color: isMe ? Colors.white : Colors.black87,
-                fontSize: 16,
-              ),
-            ),
-            SizedBox(height: 4),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatTime(message['timestamp'] ?? message['createdAt']),
-                  style: TextStyle(
-                    color: isMe ? Colors.white70 : Colors.grey,
-                    fontSize: 10,
+            if (isImage)
+              GestureDetector(
+                onTap: () {
+                  // Show full-screen image view
+                  showDialog(
+                    context: context,
+                    builder: (context) => Dialog(
+                      child: Stack(
+                        children: [
+                          InteractiveViewer(
+                            minScale: 0.5,
+                            maxScale: 4.0,
+                            child: Image.network(
+                              message['content'],
+                              fit: BoxFit.contain,
+                              loadingBuilder:
+                                  (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return Center(
+                                  child: CircularProgressIndicator(
+                                    value: loadingProgress.expectedTotalBytes !=
+                                            null
+                                        ? loadingProgress
+                                                .cumulativeBytesLoaded /
+                                            loadingProgress.expectedTotalBytes!
+                                        : null,
+                                  ),
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  height: 200,
+                                  color: Colors.grey[300],
+                                  child: Icon(Icons.error),
+                                );
+                              },
+                            ),
+                          ),
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: IconButton(
+                              icon: Icon(Icons.close, color: Colors.white),
+                              onPressed: () => Navigator.pop(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    message['content'],
+                    width: 200,
+                    height: 200,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Container(
+                        width: 200,
+                        height: 200,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            value: loadingProgress.expectedTotalBytes != null
+                                ? loadingProgress.cumulativeBytesLoaded /
+                                    loadingProgress.expectedTotalBytes!
+                                : null,
+                          ),
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        width: 200,
+                        height: 200,
+                        color: Colors.grey[300],
+                        child: Icon(Icons.error),
+                      );
+                    },
                   ),
                 ),
-                if (isMe) ...[
-                  SizedBox(width: 4),
-                  isSending
-                      ? SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white70),
-                          ),
-                        )
-                      : Icon(
-                          Icons.check,
-                          size: 12,
-                          color: Colors.white70,
-                        ),
-                ],
-              ],
+              )
+            else
+              Text(
+                message['content'],
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontSize: 16,
+                ),
+              ),
+            SizedBox(height: 4),
+            Text(
+              _formatTimestamp(message['timestamp']),
+              style: TextStyle(
+                color: Colors.black54,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
@@ -1096,14 +1276,14 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  String _formatTime(dynamic timestamp) {
+  String _formatTimestamp(dynamic timestamp) {
     if (timestamp == null) return '';
 
     try {
       final dateTime = DateTime.parse(timestamp.toString());
       return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
     } catch (e) {
-      print('Error formatting time: $timestamp, error: $e');
+      print('Error formatting timestamp: $timestamp, error: $e');
       // Return current time as fallback
       final now = DateTime.now();
       return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
@@ -1125,6 +1305,11 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       child: Row(
         children: [
+          IconButton(
+            icon: Icon(Icons.image),
+            onPressed: _isUploadingImage ? null : _pickAndSendImage,
+            tooltip: 'Send Image',
+          ),
           Expanded(
             child: TextField(
               controller: _messageController,
@@ -1142,10 +1327,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 20,
                   vertical: 10,
-                ),
-                prefixIcon: Icon(
-                  Icons.emoji_emotions_outlined,
-                  color: Colors.grey.shade600,
                 ),
               ),
               textCapitalization: TextCapitalization.sentences,

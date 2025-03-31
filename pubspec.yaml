@@ -57,6 +57,9 @@ dependencies:
   http_parser:
   mime:
   image:
+  url_launcher:
+  weather:
+  mime_type:
 
 dev_dependencies:
   flutter_test:
