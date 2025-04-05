@@ -956,4 +956,334 @@ class ChatService {
       return {'success': false, 'message': e.toString()};
     }
   }
+
+  // Add new method for voice message upload
+  Future<String> uploadVoiceMessage(File audioFile) async {
+    int maxRetries = 3;
+    int currentRetry = 0;
+    Duration retryDelay = Duration(seconds: 2);
+
+    // Cloudinary configuration
+    const cloudName = 'dkn3it92b';
+    const uploadPreset = 'mahaveer'; // Your upload preset from Cloudinary
+
+    while (currentRetry < maxRetries) {
+      try {
+        // Validate file exists
+        if (!await audioFile.exists()) {
+          throw Exception('Audio file not found');
+        }
+
+        // Validate file size (10MB limit for audio)
+        final length = await audioFile.length();
+        if (length > 10 * 1024 * 1024) {
+          throw Exception('Audio size too large. Please keep it under 10MB.');
+        }
+
+        // Validate file type
+        final mimeType = lookupMimeType(audioFile.path);
+        if (mimeType == null || !mimeType.startsWith('audio/')) {
+          throw Exception('Invalid file type. Please select an audio file.');
+        }
+
+        // Create upload request to Cloudinary using upload preset
+        final uri =
+            Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/auto/upload');
+        final request = http.MultipartRequest('POST', uri)
+          ..fields.addAll({
+            'upload_preset': uploadPreset,
+            'resource_type':
+                'auto', // This will automatically detect audio files
+            'folder': 'voice_messages', // Optional: organize files in a folder
+          });
+
+        // Add file to request
+        final stream = http.ByteStream(audioFile.openRead());
+        final multipartFile = http.MultipartFile(
+          'file',
+          stream,
+          length,
+          filename: audioFile.path.split('/').last,
+          contentType:
+              MediaType(mimeType.split('/')[0], mimeType.split('/')[1]),
+        );
+        request.files.add(multipartFile);
+
+        print('Starting audio upload attempt ${currentRetry + 1}...');
+        print('File size: ${length / 1024 / 1024}MB');
+        print('MIME type: $mimeType');
+
+        // Send request with timeout
+        final streamedResponse =
+            await request.send().timeout(Duration(seconds: 30));
+        final response = await http.Response.fromStream(streamedResponse);
+
+        print('Upload response status: ${response.statusCode}');
+        print('Upload response body: ${response.body}');
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          if (data['secure_url'] != null) {
+            return data['secure_url'];
+          }
+          throw Exception('No URL in response');
+        }
+
+        // Handle specific error cases
+        if (response.statusCode == 503) {
+          throw Exception(
+              'Cloudinary is temporarily unavailable. Please try again later.');
+        } else if (response.statusCode == 401) {
+          throw Exception(
+              'Upload preset authentication failed. Please check your configuration.');
+        }
+
+        throw Exception('Failed to upload audio: ${response.statusCode}');
+      } catch (e) {
+        currentRetry++;
+        print('Upload attempt $currentRetry failed with error: $e');
+
+        if (currentRetry >= maxRetries) {
+          print('Failed to upload audio after $maxRetries attempts: $e');
+          rethrow;
+        }
+
+        print('Retrying in ${retryDelay.inSeconds} seconds...');
+        await Future.delayed(retryDelay);
+        // Exponential backoff
+        retryDelay *= 2;
+      }
+    }
+    throw Exception('Failed to upload audio after $maxRetries attempts');
+  }
+
+  // Add new method for sending voice message
+  Future<Map<String, dynamic>> sendVoiceMessage({
+    required String receiverId,
+    required File audioFile,
+    required Duration duration,
+  }) async {
+    try {
+      // First upload the audio file
+      String audioUrl;
+      try {
+        audioUrl = await uploadVoiceMessage(audioFile);
+      } catch (e) {
+        print('Failed to upload audio file: $e');
+        return {
+          'success': false,
+          'message':
+              'Failed to upload audio. Please check your connection and try again.',
+          'error': e.toString()
+        };
+      }
+
+      // Then send the message with the audio URL
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'Authentication failed. Please log in again.',
+          'error': 'Not authenticated'
+        };
+      }
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/message/send'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization':
+              token.startsWith('Bearer ') ? token : 'Bearer $token',
+        },
+        body: json.encode({
+          'receiverId': receiverId,
+          'content': audioUrl,
+          'messageType': 'voice',
+          'type': 'voice',
+          'audioDuration': duration.inSeconds,
+        }),
+      );
+
+      if (response.statusCode == 201) {
+        final data = json.decode(response.body);
+        if (data is Map) {
+          data['messageType'] = 'voice';
+          data['audioDuration'] = duration.inSeconds;
+        }
+        return {'success': true, 'data': data};
+      }
+
+      // Handle specific error cases
+      if (response.statusCode == 503) {
+        return {
+          'success': false,
+          'message':
+              'Server is temporarily unavailable. Please try again later.',
+          'error': '503 Service Unavailable'
+        };
+      } else if (response.statusCode == 502) {
+        return {
+          'success': false,
+          'message': 'Bad gateway. Please try again later.',
+          'error': '502 Bad Gateway'
+        };
+      } else if (response.statusCode == 401) {
+        return {
+          'success': false,
+          'message': 'Authentication failed. Please log in again.',
+          'error': '401 Unauthorized'
+        };
+      }
+
+      return {
+        'success': false,
+        'message': 'Failed to send voice message. Please try again.',
+        'error': 'Status code: ${response.statusCode}'
+      };
+    } catch (e) {
+      print('Send voice message error: $e');
+      return {
+        'success': false,
+        'message': 'An unexpected error occurred. Please try again.',
+        'error': e.toString()
+      };
+    }
+  }
+
+  void _handleIncomingMessage(dynamic data,
+      {required String currentUserId, required String receiverId}) {
+    try {
+      print('========== HANDLING INCOMING MESSAGE ==========');
+      print('Received message data type: ${data.runtimeType}');
+      print('Received message data: $data');
+
+      Map<String, dynamic> message;
+
+      // Handle different message formats
+      if (data is Map) {
+        message = Map<String, dynamic>.from(data);
+        print('Message is a Map, converted to: $message');
+
+        // Handle nested data structure from server response
+        if (message.containsKey('success') && message.containsKey('data')) {
+          print('Found nested data structure, extracting message data');
+          message = Map<String, dynamic>.from(message['data']);
+        }
+      } else if (data is String) {
+        // Try to parse string as JSON
+        try {
+          message = json.decode(data);
+          print('Message is a String, parsed JSON: $message');
+        } catch (e) {
+          print('Error parsing string message: $e');
+          message = {
+            'content': data,
+            'timestamp': DateTime.now().toIso8601String()
+          };
+          print('Created fallback message: $message');
+        }
+      } else {
+        print('Unhandled message format: ${data.runtimeType}');
+        print('========== END HANDLING INCOMING MESSAGE (ERROR) ==========');
+        return;
+      }
+
+      // Check if this is a private message wrapper
+      if (message.containsKey('message') && message['message'] is Map) {
+        print('Unwrapping nested message from: $message');
+        message = Map<String, dynamic>.from(message['message']);
+        print('Unwrapped to: $message');
+      }
+
+      // Check if this is a room message
+      if (message.containsKey('room') &&
+          message.containsKey('message') &&
+          message['message'] is Map) {
+        print('Unwrapping room message from: $message');
+        message = Map<String, dynamic>.from(message['message']);
+        print('Unwrapped room message to: $message');
+      }
+
+      // Check if this is a 'to/from' format
+      if (message.containsKey('to') && message.containsKey('from')) {
+        print('Found to/from format message: $message');
+        // Create a standard format message
+        final content = message['content'] ?? message['message'] ?? '';
+        final timestamp =
+            message['timestamp'] ?? DateTime.now().toIso8601String();
+        message = {
+          'senderId': message['from'],
+          'receiverId': message['to'],
+          'content': content,
+          'timestamp': timestamp,
+        };
+        print('Converted to standard format: $message');
+      }
+
+      // Check for content field
+      if (!message.containsKey('content') &&
+          message.containsKey('message') &&
+          message['message'] is String) {
+        print('Converting message field to content: ${message['message']}');
+        message['content'] = message['message'];
+      }
+
+      // Check if we have the necessary fields
+      if (!message.containsKey('content') && !message.containsKey('message')) {
+        print('Message has no content or message field, skipping');
+        print(
+            '========== END HANDLING INCOMING MESSAGE (NO CONTENT) ==========');
+        return;
+      }
+
+      // Ensure we have sender and receiver IDs
+      final senderId = message['senderId'] ?? '';
+      final receiverId = message['receiverId'] ?? '';
+
+      print('Message senderId: $senderId, receiverId: $receiverId');
+      print(
+          'Current chat: currentUserId: $currentUserId, receiverId: $receiverId');
+
+      // Check if this message is for the current chat
+      bool isForCurrentChat = false;
+
+      // Check if the message is between the current sender and receiver
+      if ((senderId == receiverId && receiverId == currentUserId) ||
+          (senderId == currentUserId && receiverId == receiverId)) {
+        isForCurrentChat = true;
+        print('Message is for current chat');
+      } else {
+        print('Message is NOT for current chat, ignoring');
+        print('Sender ID match: ${senderId == receiverId}');
+        print('Receiver ID match: ${receiverId == currentUserId}');
+        print('Reverse sender match: ${senderId == currentUserId}');
+        print('Reverse receiver match: ${receiverId == receiverId}');
+        print('========== END HANDLING INCOMING MESSAGE (IGNORED) ==========');
+        return;
+      }
+
+      print('Processed message: $message');
+
+      if (onNewMessage != null) {
+        // Ensure the message has an ID to prevent duplicates
+        if (!message.containsKey('_id')) {
+          message['_id'] =
+              '${message['senderId'] ?? ''}_${message['content'] ?? message['message'] ?? ''}_${DateTime.now().millisecondsSinceEpoch}';
+          print('Generated message ID: ${message['_id']}');
+        }
+
+        print('Calling onNewMessage callback with message');
+        onNewMessage!(message);
+      } else {
+        print('No onNewMessage callback registered');
+      }
+
+      print('========== END HANDLING INCOMING MESSAGE ==========');
+    } catch (e) {
+      print('Error handling incoming message: $e');
+      print(e.toString());
+      print('========== END HANDLING INCOMING MESSAGE (ERROR) ==========');
+    }
+  }
 }

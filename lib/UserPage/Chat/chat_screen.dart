@@ -14,6 +14,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:path_provider/path_provider.dart';
 
 class ChatScreen extends StatefulWidget {
   final String receiverId;
@@ -51,6 +53,13 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _lastMessageTimestamp;
   final Random _random = Random();
   bool _isUploadingImage = false;
+  FlutterSoundRecorder? _audioRecorder;
+  bool _isRecording = false;
+  String? _recordingPath;
+  Duration _recordingDuration = Duration.zero;
+  Timer? _recordingTimer;
+  FlutterSoundPlayer? _audioPlayer;
+  String? _currentlyPlayingMessageId;
 
   @override
   void initState() {
@@ -64,6 +73,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _initSocket();
     _loadMessages();
+    _initAudioRecorder();
 
     // Set up periodic connection check
     Timer.periodic(Duration(seconds: 15), (timer) {
@@ -437,11 +447,20 @@ class _ChatScreenState extends State<ChatScreen> {
       _processedMessageIds.add(messageId);
       print('Added message ID to processed list: $messageId');
 
+      // Ensure message has all required fields and preserve audio duration
+      final processedMessage = {
+        ...message,
+        'timestamp': message['timestamp'] ?? DateTime.now().toIso8601String(),
+        'messageType': message['messageType'] ?? 'text',
+        'audioDuration':
+            message['audioDuration'] ?? 0, // Explicitly preserve audio duration
+      };
+
       // Add the message to the UI
       setState(() {
-        _messages.add(message);
+        _messages.add(processedMessage);
         print(
-            'Added message to UI: ${message['content'] ?? message['message']}');
+            'Added message to UI: ${processedMessage['content'] ?? processedMessage['message']}');
 
         // If this was a message we were sending, mark sending as complete
         if (senderId == widget.currentUserId) {
@@ -871,6 +890,124 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _initAudioRecorder() async {
+    _audioRecorder = FlutterSoundRecorder();
+    _audioPlayer = FlutterSoundPlayer();
+
+    // Request microphone permission
+    final status = await Permission.microphone.request();
+    if (status != PermissionStatus.granted) {
+      throw Exception('Microphone permission not granted');
+    }
+
+    // Initialize recorder
+    await _audioRecorder!.openRecorder();
+    await _audioPlayer!.openPlayer();
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      // Create a temporary file for recording
+      final tempDir = await getTemporaryDirectory();
+      _recordingPath =
+          '${tempDir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.aac';
+
+      // Start recording
+      await _audioRecorder!.startRecorder(
+        toFile: _recordingPath,
+        codec: Codec.aacADTS,
+        sampleRate: 44100,
+      );
+
+      setState(() {
+        _isRecording = true;
+        _recordingDuration = Duration.zero;
+      });
+
+      // Start timer to update duration
+      _recordingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+        setState(() {
+          _recordingDuration += Duration(seconds: 1);
+        });
+      });
+    } catch (e) {
+      print('Error starting recording: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to start recording')),
+      );
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      await _audioRecorder!.stopRecorder();
+      _recordingTimer?.cancel();
+
+      if (_recordingPath != null) {
+        final file = File(_recordingPath!);
+        if (await file.exists()) {
+          // Send the voice message
+          final response = await widget.chatService.sendVoiceMessage(
+            receiverId: widget.receiverId,
+            audioFile: file,
+            duration: _recordingDuration,
+          );
+
+          if (response['success'] == true) {
+            final message = response['data'];
+            _handleIncomingMessage(message);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to send voice message')),
+            );
+          }
+        }
+      }
+
+      setState(() {
+        _isRecording = false;
+        _recordingPath = null;
+        _recordingDuration = Duration.zero;
+      });
+    } catch (e) {
+      print('Error stopping recording: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to stop recording')),
+      );
+    }
+  }
+
+  Future<void> _playVoiceMessage(String audioUrl, String messageId) async {
+    try {
+      // If a message is already playing, stop it
+      if (_currentlyPlayingMessageId != null) {
+        await _audioPlayer!.stopPlayer();
+      }
+
+      await _audioPlayer!.startPlayer(
+        fromURI: audioUrl,
+        codec: Codec.aacADTS,
+        sampleRate: 44100,
+      );
+
+      setState(() => _currentlyPlayingMessageId = messageId);
+
+      // Listen for player completion
+      _audioPlayer!.setSubscriptionDuration(Duration(milliseconds: 100));
+      _audioPlayer!.onProgress!.listen((event) {
+        if (event.position >= event.duration) {
+          setState(() => _currentlyPlayingMessageId = null);
+        }
+      });
+    } catch (e) {
+      print('Error playing voice message: $e');
+      setState(() => _currentlyPlayingMessageId = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to play voice message')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final languageProvider = Provider.of<LanguageProvider>(context);
@@ -1146,14 +1283,32 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildMessageBubble(Map<String, dynamic> message) {
     final isMe = message['senderId'] == widget.currentUserId;
-    // Check both messageType and content URL pattern for images
-    final isImage = message['messageType'] == 'image' ||
-        (message['content'] is String &&
-            (message['content'].toString().contains('cloudinary.com') ||
-                message['content']
-                    .toString()
-                    .toLowerCase()
-                    .contains('/image/')));
+    final content = message['content']?.toString() ?? '';
+    final messageId = message['_id'] ?? message['clientId'] ?? '';
+
+    // Check for message type and content
+    bool isImage = message['messageType'] == 'image';
+    bool isVoice = message['messageType'] == 'voice';
+
+    // If messageType is not explicitly set, check the content
+    if (!isImage && !isVoice && content.contains('cloudinary.com')) {
+      final lowerContent = content.toLowerCase();
+      // Check for image extensions
+      if (lowerContent.contains('/image/') ||
+          lowerContent.endsWith('.jpg') ||
+          lowerContent.endsWith('.jpeg') ||
+          lowerContent.endsWith('.png') ||
+          lowerContent.endsWith('.gif')) {
+        isImage = true;
+      }
+      // Check for audio extensions
+      else if (lowerContent.endsWith('.mp3') ||
+          lowerContent.endsWith('.aac') ||
+          lowerContent.endsWith('.wav') ||
+          lowerContent.endsWith('.m4a')) {
+        isVoice = true;
+      }
+    }
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -1183,7 +1338,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             minScale: 0.5,
                             maxScale: 4.0,
                             child: Image.network(
-                              message['content'],
+                              content,
                               fit: BoxFit.contain,
                               loadingBuilder:
                                   (context, child, loadingProgress) {
@@ -1224,7 +1379,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.network(
-                    message['content'],
+                    content,
                     width: 200,
                     height: 200,
                     fit: BoxFit.cover,
@@ -1254,9 +1409,55 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
               )
+            else if (isVoice)
+              GestureDetector(
+                onTap: () => _playVoiceMessage(content, messageId),
+                child: Container(
+                  width: 200,
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _currentlyPlayingMessageId == messageId
+                            ? Icons.stop
+                            : Icons.play_arrow,
+                        color: Colors.green.shade800,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Voice Message',
+                              style: TextStyle(
+                                color: Colors.black87,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              '${message['audioDuration'] ?? 0}s',
+                              style: TextStyle(
+                                color: Colors.black54,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
             else
               Text(
-                message['content'],
+                content,
                 style: TextStyle(
                   color: Colors.black87,
                   fontSize: 16,
@@ -1310,30 +1511,58 @@ class _ChatScreenState extends State<ChatScreen> {
             onPressed: _isUploadingImage ? null : _pickAndSendImage,
             tooltip: 'Send Image',
           ),
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                hintText: AppLocalizations.translate(
-                  'typeMessage',
-                  currentLanguage,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: Colors.grey.shade100,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
+          if (_isRecording)
+            Expanded(
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Icon(Icons.mic, color: Colors.red),
+                    SizedBox(width: 8),
+                    Text(
+                      'Recording... ${_recordingDuration.inSeconds}s',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                  ],
                 ),
               ),
-              textCapitalization: TextCapitalization.sentences,
-              maxLines: null,
-              onSubmitted: (_) => _sendMessage(),
+            )
+          else
+            Expanded(
+              child: TextField(
+                controller: _messageController,
+                decoration: InputDecoration(
+                  hintText: AppLocalizations.translate(
+                    'typeMessage',
+                    currentLanguage,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade100,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 10,
+                  ),
+                ),
+                textCapitalization: TextCapitalization.sentences,
+                maxLines: null,
+                onSubmitted: (_) => _sendMessage(),
+              ),
             ),
-          ),
+          SizedBox(width: 8),
+          if (_isRecording)
+            IconButton(
+              icon: Icon(Icons.stop, color: Colors.red),
+              onPressed: _stopRecording,
+            )
+          else
+            IconButton(
+              icon: Icon(Icons.mic),
+              onPressed: _startRecording,
+            ),
           SizedBox(width: 8),
           Container(
             decoration: BoxDecoration(
@@ -1367,6 +1596,9 @@ class _ChatScreenState extends State<ChatScreen> {
     widget.chatService.disconnectSocket();
     socket.disconnect();
     socket.dispose();
+    _audioRecorder?.closeRecorder();
+    _audioPlayer?.closePlayer();
+    _recordingTimer?.cancel();
     super.dispose();
   }
 }

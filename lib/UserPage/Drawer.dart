@@ -1,3 +1,4 @@
+import 'package:farmcare/Ecommerce/ecommerceHome.dart';
 import 'package:farmcare/UserPage/Blog/Create_Blog/create_blog_ui.dart'; // Add this import
 import 'package:farmcare/UserPage/Settings/language_settings.dart';
 import 'package:farmcare/utils/app_localizations.dart';
@@ -140,9 +141,15 @@ class _CustomDrawerState extends State<CustomDrawer> {
                 ),
                 _buildDrawerItem(
                   Icons.shopping_cart_outlined,
-                  _getTranslatedText('ecommerce'),
-                  onTap: () =>
-                      Navigator.pushReplacementNamed(context, '/ecommerce'),
+                  _getTranslatedText('Ecommerce'),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => EcommerceHomePage(),
+                      ),
+                    );
+                  },
                 ),
                 _buildDrawerItem(
                   _userRole == 'doctor' ? Icons.chat : Icons.person_pin,

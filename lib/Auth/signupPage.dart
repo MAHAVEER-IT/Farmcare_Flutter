@@ -255,7 +255,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   child: AnimatedTextKit(
                     animatedTexts: [
                       TyperAnimatedText(
-                        "FarmSync",
+                        "Sow&Grow",
                         speed: Duration(milliseconds: 200),
                       ),
                     ],
