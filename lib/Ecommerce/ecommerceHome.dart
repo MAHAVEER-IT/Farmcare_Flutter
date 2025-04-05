@@ -14,17 +14,17 @@ class _EcommerceHomePageState extends State<EcommerceHomePage> {
     CategoryItem(
       title: "Livestock",
       image: "images/Ecommerce/LiveStock.png",
-      color: Colors.green.shade100,
+      color: Colors.green.shade400,
     ),
     CategoryItem(
       title: "Rent Equipment",
       image: "images/Ecommerce/rent.png",
-      color: Colors.green.shade200,
+      color: Colors.green.shade400,
     ),
     CategoryItem(
       title: "Farm Tools",
       image: "images/Ecommerce/Tools.png",
-      color: Colors.green.shade300,
+      color: Colors.green.shade400,
     ),
     CategoryItem(
       title: "Seeds & Plants",
@@ -41,14 +41,17 @@ class _EcommerceHomePageState extends State<EcommerceHomePage> {
       drawer: CustomDrawer(),
       appBar: AppBar(
         elevation: 0,
-        title: const Text(
-          "AgriMart",
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 22,
+        title: const Center(
+          child: const Text(
+            "AgriMart",
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 22,
+              color: Colors.white,
+            ),
           ),
         ),
-        backgroundColor: Colors.green,
+        backgroundColor: Colors.green.shade800,
         actions: [
           IconButton(
             icon: const Icon(Icons.shopping_cart),

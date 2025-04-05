@@ -1,5 +1,4 @@
 import 'package:farmcare/Auth/loginPage.dart';
-import 'package:farmcare/UserPage/bottom_nav.dart';
 import 'package:farmcare/utils/app_localizations.dart';
 import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +16,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String _username = '';
   String _email = '';
   String _userType = '';
+
   bool _isLoading = true;
 
   @override
@@ -81,8 +81,6 @@ class _ProfilePageState extends State<ProfilePage> {
       );
     }
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -184,41 +182,6 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       child: Column(
         children: [
-          _buildProfileOption(
-            icon: Icons.person_outline,
-            title: AppLocalizations.translate('editProfile', currentLanguage),
-            onTap: () {
-              // Implement edit profile
-            },
-          ),
-          _buildProfileOption(
-            icon: Icons.notifications_outlined,
-            title: AppLocalizations.translate('notifications', currentLanguage),
-            onTap: () {
-              // Implement notifications
-            },
-          ),
-          _buildProfileOption(
-            icon: Icons.language_outlined,
-            title: AppLocalizations.translate('language', currentLanguage),
-            onTap: () {
-              // Implement language selection
-            },
-          ),
-          _buildProfileOption(
-            icon: Icons.help_outline,
-            title: AppLocalizations.translate('help', currentLanguage),
-            onTap: () {
-              // Implement help section
-            },
-          ),
-          _buildProfileOption(
-            icon: Icons.info_outline,
-            title: AppLocalizations.translate('about', currentLanguage),
-            onTap: () {
-              // Implement about section
-            },
-          ),
           Spacer(),
           _buildLogoutButton(currentLanguage),
         ],

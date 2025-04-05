@@ -1,9 +1,11 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:farmcare/UserPage/Blog/Blog_UI.dart';
 import 'package:farmcare/UserPage/Profile/profile_page.dart';
 import 'package:farmcare/UserPage/bottom_nav.dart';
 import 'package:farmcare/utils/language_provider.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../Ecommerce/ecommerceHome.dart';
 
 class UserContentPage extends StatefulWidget {
   const UserContentPage({super.key});
@@ -17,7 +19,7 @@ class _UserContentPageState extends State<UserContentPage> {
 
   final List<Widget> _pages = [
     Blog(),
-    Center(child: Text('E-commerce Coming Soon')), // Placeholder for e-commerce
+    EcommerceHomePage(), // Placeholder for e-commerce
     ProfilePage(),
   ];
 

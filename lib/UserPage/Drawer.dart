@@ -181,7 +181,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (context) => const LanguageSettings()),
+                        builder: (context) => const LanguageSettings(),),
                   ),
                 ),
                 _buildDrawerItem(
