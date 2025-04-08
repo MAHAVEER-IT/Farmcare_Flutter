@@ -1,4 +1,3 @@
-import 'package:farmcare/Ecommerce/ecommerceHome.dart';
 import 'package:farmcare/UserPage/Blog/Create_Blog/create_blog_ui.dart'; // Add this import
 import 'package:farmcare/UserPage/Settings/language_settings.dart';
 import 'package:farmcare/utils/app_localizations.dart';
@@ -6,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Chat/doctors_page.dart';
+import 'Help/Help_page.dart';
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -140,18 +140,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
                   onTap: () => _navigateToCreateBlog(context),
                 ),
                 _buildDrawerItem(
-                  Icons.shopping_cart_outlined,
-                  _getTranslatedText('Ecommerce'),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => EcommerceHomePage(),
-                      ),
-                    );
-                  },
-                ),
-                _buildDrawerItem(
                   _userRole == 'doctor' ? Icons.chat : Icons.person_pin,
                   _userRole == 'doctor'
                       ? 'Chats'
@@ -181,13 +169,19 @@ class _CustomDrawerState extends State<CustomDrawer> {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (context) => const LanguageSettings(),),
+                      builder: (context) => const LanguageSettings(),
+                    ),
                   ),
                 ),
                 _buildDrawerItem(
                   Icons.help_outline,
                   _getTranslatedText('help'),
-                  onTap: () => Navigator.pushNamed(context, '/help'),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => HelpPage(),
+                    ),
+                  ),
                 ),
                 _buildDrawerItem(
                   Icons.logout,

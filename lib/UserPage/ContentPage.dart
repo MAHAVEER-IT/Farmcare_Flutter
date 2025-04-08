@@ -5,7 +5,7 @@ import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../Ecommerce/ecommerceHome.dart';
+import '../AI_ChatBot/chatBot_page.dart';
 
 class UserContentPage extends StatefulWidget {
   const UserContentPage({super.key});
@@ -19,7 +19,7 @@ class _UserContentPageState extends State<UserContentPage> {
 
   final List<Widget> _pages = [
     Blog(),
-    EcommerceHomePage(), // Placeholder for e-commerce
+    ChatScreen(),
     ProfilePage(),
   ];
 

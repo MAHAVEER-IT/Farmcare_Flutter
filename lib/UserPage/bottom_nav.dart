@@ -3,8 +3,6 @@ import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'Profile/profile_page.dart';
-
 class BottomNavBar extends StatefulWidget {
   final int selectedIndex;
   final Function(int) onTabChange;
@@ -48,14 +46,14 @@ class _BottomNavBarState extends State<BottomNavBar> {
           ),
           _buildNavItem(
             context: context,
-            icon: Icons.shopping_cart,
-            label: _getTranslation('ecommerce', currentLanguage),
+            icon: Icons.chat_bubble_outline,
+            label: _getTranslation('chatbot', currentLanguage),
             index: 1,
           ),
           _buildNavItem(
             context: context,
             icon: Icons.person,
-            label: _getTranslation('profile', currentLanguage),
+            label: _getTranslation('Doctors', currentLanguage),
             index: 2,
           ),
         ],
@@ -69,7 +67,7 @@ class _BottomNavBarState extends State<BottomNavBar> {
     } catch (e) {
       const fallbackValues = {
         'blog': 'Blog',
-        'ecommerce': 'Shop',
+        'chatbot': 'Chat',
         'profile': 'Profile',
       };
       return fallbackValues[key] ?? key;

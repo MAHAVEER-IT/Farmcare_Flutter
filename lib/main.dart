@@ -4,6 +4,7 @@ import 'package:farmcare/UserPage/ContentPage.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'UserPage/Map_diseise/Dedict_desisease.dart';
 import 'utils/language_provider.dart';
 
 void main() {
@@ -26,7 +27,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.green,
         scaffoldBackgroundColor: Colors.white,
       ),
-      home: AuthCheck(),
+      home: HeatmapPageMap(),
     );
   }
 }
