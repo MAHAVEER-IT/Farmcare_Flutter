@@ -69,6 +69,8 @@ dependencies:
   flutter_map:
   latlong2:
   geocoding:
+  flutter_local_notifications:
+  timezone:
 
 dev_dependencies:
   flutter_test:
@@ -105,6 +107,7 @@ flutter:
     - images/Ecommerce/rent.png
     - images/Ecommerce/seeds.png
     - images/Ecommerce/Tools.png
+    - images/pet.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

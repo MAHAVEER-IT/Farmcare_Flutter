@@ -53,7 +53,7 @@ class _BottomNavBarState extends State<BottomNavBar> {
           _buildNavItem(
             context: context,
             icon: Icons.person,
-            label: _getTranslation('Doctors', currentLanguage),
+            label: _getTranslation('Vet', currentLanguage),
             index: 2,
           ),
         ],

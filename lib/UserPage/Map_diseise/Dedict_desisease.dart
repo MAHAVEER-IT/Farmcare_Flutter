@@ -12,7 +12,6 @@ class HeatmapPageMap extends StatefulWidget {
 }
 
 class _HeatmapPageStateMap extends State<HeatmapPageMap> {
-  // Map controller
   MapController _mapController = MapController();
 
   // Place name state variable

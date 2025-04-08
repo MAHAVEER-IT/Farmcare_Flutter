@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Chat/doctors_page.dart';
 import 'Help/Help_page.dart';
+import 'Map_diseise/Dedict_desisease.dart';
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -161,6 +162,16 @@ class _CustomDrawerState extends State<CustomDrawer> {
                       );
                     }
                   },
+                ),
+                _buildDrawerItem(
+                  Icons.map,
+                  _getTranslatedText('Heat Disease Map'),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => HeatmapPageMap(),
+                    ),
+                  ),
                 ),
                 const Divider(thickness: 1, color: Colors.green),
                 _buildDrawerItem(

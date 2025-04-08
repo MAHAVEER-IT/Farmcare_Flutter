@@ -1,11 +1,11 @@
 import 'package:farmcare/UserPage/Blog/Blog_UI.dart';
-import 'package:farmcare/UserPage/Profile/profile_page.dart';
 import 'package:farmcare/UserPage/bottom_nav.dart';
 import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../AI_ChatBot/chatBot_page.dart';
+import 'Vet_Vac/Vet_page.dart';
 
 class UserContentPage extends StatefulWidget {
   const UserContentPage({super.key});
@@ -20,7 +20,7 @@ class _UserContentPageState extends State<UserContentPage> {
   final List<Widget> _pages = [
     Blog(),
     ChatScreen(),
-    ProfilePage(),
+    PetVaccinationApp(),
   ];
 
   void _onTabChange(int index) {
