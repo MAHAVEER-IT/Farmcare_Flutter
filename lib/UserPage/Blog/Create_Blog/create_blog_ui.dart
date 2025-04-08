@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import 'create_blog_services.dart';
 
@@ -20,8 +21,26 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
   File? _imageFile;
   bool _isLoading = false;
   String? _imageError;
-  bool _isRequestingPermission = false;
+
   final CreateBlogService _blogService = CreateBlogService();
+
+  late stt.SpeechToText _speech;
+  bool _isListening = false;
+  double _confidence = 1.0;
+  String _selectedLanguage = 'ta-IN';
+
+  final Map<String, String> _languageMap = {
+    'தமிழ்': 'ta-IN',
+    'മലയാളം': 'ml-IN',
+    'हिन्दी': 'hi-IN',
+    'English': 'en-US',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _speech = stt.SpeechToText();
+  }
 
   @override
   void dispose() {
@@ -34,8 +53,6 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
     try {
       setState(() => _imageError = null);
 
-      // Request permissions first
-
       final ImagePicker picker = ImagePicker();
       final XFile? image = await picker.pickImage(
         source: ImageSource.gallery,
@@ -45,7 +62,6 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
         final file = File(image.path);
         final size = await file.length();
 
-        // Check file size (5MB limit)
         if (size > 5 * 1024 * 1024) {
           setState(() {
             _imageError = 'Image size should be less than 5MB';
@@ -53,7 +69,6 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
           return;
         }
 
-        // Check file type
         final mimeType = lookupMimeType(image.path);
         if (!mimeType!.startsWith('image/')) {
           setState(() {
@@ -72,6 +87,35 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
       setState(() {
         _imageError = 'Error picking image: $e';
       });
+    }
+  }
+
+  void _listen() async {
+    if (!_isListening) {
+      bool available = await _speech.initialize(
+        onStatus: (val) => print('STATUS: $val'),
+        onError: (val) => print('ERROR: $val'),
+      );
+      if (available) {
+        setState(() => _isListening = true);
+        await _speech.listen(
+          localeId: _selectedLanguage,
+          onResult: (val) {
+            setState(() {
+              _contentController.text = val.recognizedWords;
+              _contentController.selection = TextSelection.fromPosition(
+                TextPosition(offset: _contentController.text.length),
+              );
+              if (val.hasConfidenceRating && val.confidence > 0) {
+                _confidence = val.confidence;
+              }
+            });
+          },
+        );
+      }
+    } else {
+      setState(() => _isListening = false);
+      _speech.stop();
     }
   }
 
@@ -157,7 +201,6 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Image picker card
                     Card(
                       elevation: 4,
                       shape: RoundedRectangleBorder(
@@ -238,8 +281,6 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                       ),
                     ),
                     SizedBox(height: 16),
-
-                    // Title field
                     Card(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(15),
@@ -267,8 +308,6 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                       ),
                     ),
                     SizedBox(height: 16),
-
-                    // Content field
                     Card(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(15),
@@ -276,32 +315,69 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                       child: Padding(
                         padding:
                             EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: TextFormField(
-                          controller: _contentController,
-                          enabled: !_isLoading,
-                          maxLines: 10,
-                          decoration: InputDecoration(
-                            hintText: 'Write your blog content here...',
-                            border: InputBorder.none,
-                          ),
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'Please enter some content';
-                            }
-                            if (value!.length < 10) {
-                              return 'Content too short (min 10 characters)';
-                            }
-                            if (value.length > 5000) {
-                              return 'Content too long (max 5000 characters)';
-                            }
-                            return null;
-                          },
+                        child: Column(
+                          children: [
+                            TextFormField(
+                              controller: _contentController,
+                              enabled: !_isLoading,
+                              maxLines: 10,
+                              decoration: InputDecoration(
+                                hintText: 'Write your blog content here...',
+                                border: InputBorder.none,
+                              ),
+                              validator: (value) {
+                                if (value?.isEmpty ?? true) {
+                                  return 'Please enter some content';
+                                }
+                                if (value!.length < 10) {
+                                  return 'Content too short (min 10 characters)';
+                                }
+                                if (value.length > 5000) {
+                                  return 'Content too long (max 5000 characters)';
+                                }
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: DropdownButton<String>(
+                                    value: _languageMap.entries
+                                        .firstWhere(
+                                            (e) => e.value == _selectedLanguage)
+                                        .key,
+                                    onChanged: (String? newValue) {
+                                      setState(() {
+                                        _selectedLanguage =
+                                            _languageMap[newValue!]!;
+                                      });
+                                    },
+                                    items: _languageMap.keys
+                                        .map<DropdownMenuItem<String>>(
+                                            (String lang) =>
+                                                DropdownMenuItem<String>(
+                                                  value: lang,
+                                                  child: Text(lang),
+                                                ))
+                                        .toList(),
+                                  ),
+                                ),
+                                FloatingActionButton(
+                                  onPressed: _listen,
+                                  mini: true,
+                                  backgroundColor: Colors.green.shade800,
+                                  child: Icon(
+                                      _isListening ? Icons.mic_off : Icons.mic),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     ),
                     SizedBox(height: 24),
-
-                    // Submit button
                     ElevatedButton(
                       onPressed: _isLoading ? null : _handleSubmit,
                       style: ElevatedButton.styleFrom(

@@ -71,6 +71,8 @@ dependencies:
   geocoding:
   flutter_local_notifications:
   timezone:
+  speech_to_text:
+
 
 dev_dependencies:
   flutter_test:

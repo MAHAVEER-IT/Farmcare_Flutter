@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -37,10 +38,29 @@ class _ChatScreenState extends State<ChatScreen> {
   final Color _earthBrown = const Color(0xFF795548);
   final Color _creamBackground = const Color(0xFFF5F5DC);
 
+  late stt.SpeechToText _speech;
+  bool _isListening = false;
+  double _confidence = 1.0;
+  String _selectedLanguage = 'ta-IN';
+
+  final Map<String, String> _languageMap = {
+    'தமிழ்': 'ta-IN',
+    'മലയാളം': 'ml-IN',
+    'हिन्दी': 'hi-IN',
+    'English': 'en-US',
+  };
+
   @override
   void initState() {
     super.initState();
+    _speech = stt.SpeechToText();
     _initializeGemini();
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
   }
 
   void _initializeGemini() {
@@ -127,6 +147,35 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _selectedImage = File(image.path);
       });
+    }
+  }
+
+  void _listen() async {
+    if (!_isListening) {
+      bool available = await _speech.initialize(
+        onStatus: (val) => print('STATUS: $val'),
+        onError: (val) => print('ERROR: $val'),
+      );
+      if (available) {
+        setState(() => _isListening = true);
+        await _speech.listen(
+          localeId: _selectedLanguage,
+          onResult: (val) {
+            setState(() {
+              _textController.text = val.recognizedWords;
+              _textController.selection = TextSelection.fromPosition(
+                TextPosition(offset: _textController.text.length),
+              );
+              if (val.hasConfidenceRating && val.confidence > 0) {
+                _confidence = val.confidence;
+              }
+            });
+          },
+        );
+      }
+    } else {
+      setState(() => _isListening = false);
+      _speech.stop();
     }
   }
 
@@ -325,47 +374,82 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildTextComposer() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
-      child: Row(
+      child: Column(
         children: [
-          IconButton(
-            icon: Icon(Icons.photo_camera, color: _earthBrown, size: 28),
-            onPressed: _pickImage,
-            tooltip: 'Send a crop or field image',
-          ),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: _lightGreen),
-              ),
-              child: TextField(
-                controller: _textController,
-                decoration: const InputDecoration(
-                  hintText:
-                      'Ask about crops, weather, or farming techniques...',
-                  border: InputBorder.none,
-                  hintStyle: TextStyle(color: Colors.grey),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: DropdownButton<String>(
+                  value: _languageMap.entries
+                      .firstWhere((e) => e.value == _selectedLanguage)
+                      .key,
+                  onChanged: (String? newValue) {
+                    setState(() {
+                      _selectedLanguage = _languageMap[newValue!]!;
+                    });
+                  },
+                  items: _languageMap.keys
+                      .map<DropdownMenuItem<String>>(
+                          (String lang) => DropdownMenuItem<String>(
+                                value: lang,
+                                child: Text(lang),
+                              ))
+                      .toList(),
                 ),
-                maxLines: null,
-                textInputAction: TextInputAction.send,
-                onSubmitted: _isLoading ? null : _handleSubmit,
               ),
-            ),
+              FloatingActionButton(
+                onPressed: _listen,
+                mini: true,
+                backgroundColor: Colors.green.shade800,
+                child: Icon(_isListening ? Icons.mic_off : Icons.mic),
+              ),
+            ],
           ),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 4.0),
-            child: FloatingActionButton(
-              onPressed:
-                  _isLoading ? null : () => _handleSubmit(_textController.text),
-              backgroundColor: _primaryGreen,
-              elevation: 2,
-              child: Icon(
-                Icons.send,
-                color: Colors.white,
+          Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.photo_camera, color: _earthBrown, size: 28),
+                onPressed: _pickImage,
+                tooltip: 'Send a crop or field image',
               ),
-            ),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: _lightGreen),
+                  ),
+                  child: TextField(
+                    controller: _textController,
+                    decoration: const InputDecoration(
+                      hintText:
+                          'Ask about crops, weather, or farming techniques...',
+                      border: InputBorder.none,
+                      hintStyle: TextStyle(color: Colors.grey),
+                    ),
+                    maxLines: null,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: _isLoading ? null : _handleSubmit,
+                  ),
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 4.0),
+                child: FloatingActionButton(
+                  onPressed: _isLoading
+                      ? null
+                      : () => _handleSubmit(_textController.text),
+                  backgroundColor: _primaryGreen,
+                  elevation: 2,
+                  child: Icon(
+                    Icons.send,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
