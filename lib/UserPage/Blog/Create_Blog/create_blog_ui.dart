@@ -166,18 +166,31 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Colors.green.shade800,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         title: Text(
           "Create Blog",
           style: TextStyle(
             color: Colors.white,
-            fontStyle: FontStyle.italic,
-            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            fontSize: 26,
+            letterSpacing: 1.2,
+            shadows: [
+              Shadow(
+                blurRadius: 3.0,
+                color: Colors.black.withOpacity(0.3),
+                offset: Offset(1.0, 1.0),
+              ),
+            ],
           ),
         ),
         centerTitle: true,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
       ),
       body: Container(
         width: double.infinity,
@@ -185,8 +198,8 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              Color.fromRGBO(185, 234, 147, 1),
-              Color.fromRGBO(14, 93, 20, 1)
+              Colors.teal.shade400,
+              Colors.teal.shade100,
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -194,216 +207,532 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
         ),
         child: Stack(
           children: [
-            SingleChildScrollView(
-              padding: EdgeInsets.all(16),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Card(
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Column(
-                        children: [
-                          InkWell(
-                            onTap: _isLoading ? null : _pickImage,
-                            child: Container(
-                              height: 200,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(15),
-                                color: Colors.grey[200],
-                              ),
-                              child: _imageFile != null
-                                  ? Stack(
-                                      children: [
-                                        ClipRRect(
-                                          borderRadius:
-                                              BorderRadius.circular(15),
-                                          child: Image.file(
-                                            _imageFile!,
-                                            fit: BoxFit.cover,
-                                            width: double.infinity,
-                                          ),
-                                        ),
-                                        Positioned(
-                                          top: 8,
-                                          right: 8,
-                                          child: IconButton(
-                                            icon: Icon(Icons.close),
-                                            onPressed: () => setState(() {
-                                              _imageFile = null;
-                                              _imageError = null;
-                                            }),
-                                            color: Colors.white,
-                                            style: IconButton.styleFrom(
-                                              backgroundColor: Colors.black54,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  : Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.add_photo_alternate_outlined,
-                                          size: 50,
-                                          color: Colors.grey[600],
-                                        ),
-                                        SizedBox(height: 8),
-                                        Text(
-                                          'Add Cover Image',
-                                          style: TextStyle(
-                                            color: Colors.grey[600],
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            ),
-                          ),
-                          if (_imageError != null)
-                            Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text(
-                                _imageError!,
-                                style: TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: 16),
-                    Card(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Padding(
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        child: TextFormField(
-                          controller: _titleController,
-                          enabled: !_isLoading,
-                          decoration: InputDecoration(
-                            hintText: 'Blog Title',
-                            border: InputBorder.none,
-                          ),
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'Please enter a title';
-                            }
-                            if (value!.length > 100) {
-                              return 'Title too long (max 100 characters)';
-                            }
-                            return null;
-                          },
+            // Background pattern
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.05,
+                child: Image.network(
+                  'https://www.transparenttextures.com/patterns/cubes.png',
+                  repeat: ImageRepeat.repeat,
+                ),
+              ),
+            ),
+            SafeArea(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.all(20),
+                physics: BouncingScrollPhysics(),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        "Share Your Story",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
                         ),
+                        textAlign: TextAlign.center,
                       ),
-                    ),
-                    SizedBox(height: 16),
-                    Card(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Padding(
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      SizedBox(height: 24),
+                      // Cover Image Card
+                      Card(
+                        elevation: 8,
+                        shadowColor: Colors.black26,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
                         child: Column(
                           children: [
-                            TextFormField(
-                              controller: _contentController,
-                              enabled: !_isLoading,
-                              maxLines: 10,
-                              decoration: InputDecoration(
-                                hintText: 'Write your blog content here...',
-                                border: InputBorder.none,
+                            InkWell(
+                              onTap: _isLoading ? null : _pickImage,
+                              borderRadius: BorderRadius.circular(20),
+                              child: Container(
+                                height: 220,
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  gradient: _imageFile == null
+                                      ? LinearGradient(
+                                          colors: [
+                                            Colors.teal.shade100,
+                                            Colors.teal.shade50,
+                                          ],
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                        )
+                                      : null,
+                                ),
+                                child: _imageFile != null
+                                    ? Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                            child: Image.file(
+                                              _imageFile!,
+                                              fit: BoxFit.cover,
+                                              width: double.infinity,
+                                            ),
+                                          ),
+                                          // Overlay gradient for better text visibility
+                                          Container(
+                                            decoration: BoxDecoration(
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topCenter,
+                                                end: Alignment.bottomCenter,
+                                                colors: [
+                                                  Colors.transparent,
+                                                  Colors.black.withOpacity(0.4),
+                                                ],
+                                                stops: [0.7, 1.0],
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            bottom: 16,
+                                            left: 16,
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                  horizontal: 12, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white
+                                                    .withOpacity(0.8),
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.edit,
+                                                    size: 16,
+                                                    color: Colors.blueGrey[800],
+                                                  ),
+                                                  SizedBox(width: 4),
+                                                  Text(
+                                                    'Change Image',
+                                                    style: TextStyle(
+                                                      color:
+                                                          Colors.blueGrey[800],
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 12,
+                                            right: 12,
+                                            child: InkWell(
+                                              onTap: () => setState(() {
+                                                _imageFile = null;
+                                                _imageError = null;
+                                              }),
+                                              child: Container(
+                                                padding: EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white
+                                                      .withOpacity(0.8),
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: Icon(
+                                                  Icons.close_rounded,
+                                                  size: 20,
+                                                  color: Colors.blueGrey[800],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Container(
+                                            padding: EdgeInsets.all(20),
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color:
+                                                  Colors.white.withOpacity(0.2),
+                                            ),
+                                            child: Icon(
+                                              Icons.add_photo_alternate_rounded,
+                                              size: 50,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                          SizedBox(height: 12),
+                                          Text(
+                                            'Add Cover Image',
+                                            style: TextStyle(
+                                              color: Colors.black,
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          SizedBox(height: 6),
+                                          Text(
+                                            'Make your story stand out',
+                                            style: TextStyle(
+                                              color: Colors.black54,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                               ),
-                              validator: (value) {
-                                if (value?.isEmpty ?? true) {
-                                  return 'Please enter some content';
-                                }
-                                if (value!.length < 10) {
-                                  return 'Content too short (min 10 characters)';
-                                }
-                                if (value.length > 5000) {
-                                  return 'Content too long (max 5000 characters)';
-                                }
-                                return null;
-                              },
                             ),
-                            SizedBox(height: 16),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: DropdownButton<String>(
-                                    value: _languageMap.entries
-                                        .firstWhere(
-                                            (e) => e.value == _selectedLanguage)
-                                        .key,
-                                    onChanged: (String? newValue) {
-                                      setState(() {
-                                        _selectedLanguage =
-                                            _languageMap[newValue!]!;
-                                      });
-                                    },
-                                    items: _languageMap.keys
-                                        .map<DropdownMenuItem<String>>(
-                                            (String lang) =>
-                                                DropdownMenuItem<String>(
-                                                  value: lang,
-                                                  child: Text(lang),
-                                                ))
-                                        .toList(),
+                            if (_imageError != null)
+                              Padding(
+                                padding: EdgeInsets.all(12),
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Colors.red.shade200,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.error_outline,
+                                        color: Colors.red,
+                                        size: 18,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _imageError!,
+                                          style: TextStyle(
+                                            color: Colors.red.shade800,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                FloatingActionButton(
-                                  onPressed: _listen,
-                                  mini: true,
-                                  backgroundColor: Colors.green.shade800,
-                                  child: Icon(
-                                      _isListening ? Icons.mic_off : Icons.mic),
-                                ),
-                              ],
-                            ),
+                              ),
                           ],
                         ),
                       ),
-                    ),
-                    SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : _handleSubmit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green.shade800,
-                        padding: EdgeInsets.symmetric(vertical: 16),
+                      SizedBox(height: 24),
+                      // Title Card
+                      Card(
+                        elevation: 6,
+                        shadowColor: Colors.black12,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Padding(
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                          child: TextFormField(
+                            controller: _titleController,
+                            enabled: !_isLoading,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.blueGrey[800],
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Title Your Story',
+                              hintStyle: TextStyle(
+                                color: Colors.blueGrey[300],
+                                fontWeight: FontWeight.w500,
+                              ),
+                              prefixIcon: Icon(
+                                Icons.title,
+                                color: Colors.teal.shade400,
+                              ),
+                              border: InputBorder.none,
+                              contentPadding:
+                                  EdgeInsets.symmetric(vertical: 16),
+                            ),
+                            validator: (value) {
+                              if (value?.isEmpty ?? true) {
+                                return 'Please enter a title';
+                              }
+                              if (value!.length > 100) {
+                                return 'Title too long (max 100 characters)';
+                              }
+                              return null;
+                            },
+                          ),
                         ),
                       ),
-                      child: Text(
-                        _isLoading ? 'Creating...' : 'Create Blog Post',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                      SizedBox(height: 24),
+                      // Content Card
+                      Card(
+                        elevation: 6,
+                        shadowColor: Colors.black12,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.edit_note_rounded,
+                                    color: Colors.teal.shade400,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    'Write Your Story',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.blueGrey[800],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Divider(height: 24),
+                              TextFormField(
+                                controller: _contentController,
+                                enabled: !_isLoading,
+                                maxLines: 10,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  height: 1.6,
+                                  color: Colors.blueGrey[800],
+                                ),
+                                decoration: InputDecoration(
+                                  hintText:
+                                      'Share your thoughts, ideas, and stories here...',
+                                  hintStyle: TextStyle(
+                                    color: Colors.blueGrey[300],
+                                  ),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                validator: (value) {
+                                  if (value?.isEmpty ?? true) {
+                                    return 'Please enter some content';
+                                  }
+                                  if (value!.length < 10) {
+                                    return 'Content too short (min 10 characters)';
+                                  }
+                                  if (value.length > 5000) {
+                                    return 'Content too long (max 5000 characters)';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              SizedBox(height: 16),
+                              Container(
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Container(
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: Colors.grey.shade300,
+                                          ),
+                                        ),
+                                        child: DropdownButtonHideUnderline(
+                                          child: DropdownButton<String>(
+                                            value: _languageMap.entries
+                                                .firstWhere((e) =>
+                                                    e.value ==
+                                                    _selectedLanguage)
+                                                .key,
+                                            onChanged: (String? newValue) {
+                                              setState(() {
+                                                _selectedLanguage =
+                                                    _languageMap[newValue!]!;
+                                              });
+                                            },
+                                            icon: Icon(
+                                              Icons.keyboard_arrow_down_rounded,
+                                              color: Colors.teal.shade400,
+                                            ),
+                                            items: _languageMap.keys
+                                                .map<DropdownMenuItem<String>>(
+                                                    (String lang) =>
+                                                        DropdownMenuItem<
+                                                            String>(
+                                                          value: lang,
+                                                          child: Text(
+                                                            lang,
+                                                            style: TextStyle(
+                                                              fontSize: 14,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w500,
+                                                            ),
+                                                          ),
+                                                        ))
+                                                .toList(),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: 12),
+                                    Material(
+                                      color: _isListening
+                                          ? Color(0xFFFF4081)
+                                          : Colors.teal.shade400,
+                                      borderRadius: BorderRadius.circular(12),
+                                      elevation: 2,
+                                      child: InkWell(
+                                        onTap: _listen,
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Container(
+                                          padding: EdgeInsets.all(12),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                _isListening
+                                                    ? Icons.mic
+                                                    : Icons.mic_none_rounded,
+                                                color: Colors.white,
+                                              ),
+                                              SizedBox(width: 8),
+                                              Text(
+                                                _isListening
+                                                    ? 'Listening...'
+                                                    : 'Voice Input',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                      SizedBox(height: 32),
+                      // Submit Button
+                      ElevatedButton(
+                        onPressed: _isLoading ? null : _handleSubmit,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Color(0xFF6A11CB),
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          elevation: 4,
+                          shadowColor: Color(0xFF6A11CB).withOpacity(0.4),
+                          disabledBackgroundColor: Colors.grey.shade400,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_isLoading)
+                              Container(
+                                width: 24,
+                                height: 24,
+                                margin: EdgeInsets.only(right: 12),
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            Text(
+                              _isLoading
+                                  ? 'Publishing...'
+                                  : 'Publish Blog Post',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            if (!_isLoading)
+                              Container(
+                                margin: EdgeInsets.only(left: 8),
+                                child: Icon(Icons.send_rounded),
+                              ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 32),
+                    ],
+                  ),
                 ),
               ),
             ),
             if (_isLoading)
-              Container(
-                color: Colors.black26,
-                child: Center(
-                  child: CircularProgressIndicator(),
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black38,
+                  child: Center(
+                    child: Container(
+                      padding: EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black12,
+                            blurRadius: 16,
+                            spreadRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 50,
+                            height: 50,
+                            child: CircularProgressIndicator(
+                              color: Color(0xFF6A11CB),
+                              strokeWidth: 5,
+                            ),
+                          ),
+                          SizedBox(height: 16),
+                          Text(
+                            'Publishing your blog...',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blueGrey[800],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
           ],

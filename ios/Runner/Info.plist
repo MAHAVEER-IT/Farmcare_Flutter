@@ -49,5 +49,11 @@
 	<string>This app needs access to your photo library to upload images</string>
 	<key>NSCameraUsageDescription</key>
 	<string>This app needs camera access to take photos</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app needs access to location to show disease reports on the map.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>This app needs access to location to show disease reports on the map.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app needs access to location to show disease reports on the map.</string>
 </dict>
 </plist>

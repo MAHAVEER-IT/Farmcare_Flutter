@@ -1,8 +1,33 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+
+// Disease Point class definition
+class DiseasePoint {
+  final LatLng location;
+  final String diseaseName;
+  final String cropType;
+  final double intensity;
+  final int caseCount;
+  final String placeName;
+  final bool isPlantDisease;
+  final DateTime reportDate;
+  final String notes;
+
+  DiseasePoint({
+    required this.location,
+    required this.diseaseName,
+    required this.cropType,
+    required this.intensity,
+    required this.caseCount,
+    required this.placeName,
+    required this.isPlantDisease,
+    required this.reportDate,
+    this.notes = '',
+  });
+}
 
 class HeatmapPageMap extends StatefulWidget {
   const HeatmapPageMap({Key? key}) : super(key: key);
@@ -16,24 +41,30 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
 
   // Place name state variable
   String _currentPlaceName = "";
+  LatLng? _currentLocation;
+  List<DiseasePoint> _diseasePoints = [];
 
-  // Simulated disease data points for the heatmap
-  final List<DiseasePoint> _diseasePoints = [
+  // Updated disease data points to include disease type (plant/animal)
+  final List<DiseasePoint> _diseasePointsStatic = [
     DiseasePoint(
       location: LatLng(37.7749, -122.4194),
       diseaseName: "Leaf Spot",
       cropType: "Tomato",
       intensity: 0.8,
       caseCount: 12,
-      placeName: "San Francisco, CA", // Added place name
+      placeName: "San Francisco, CA",
+      isPlantDisease: true,
+      reportDate: DateTime.now(),
     ),
     DiseasePoint(
       location: LatLng(37.7850, -122.4100),
-      diseaseName: "Leaf Spot",
-      cropType: "Tomato",
+      diseaseName: "Foot and Mouth",
+      cropType: "Cattle",
       intensity: 0.5,
       caseCount: 7,
-      placeName: "Fisherman's Wharf, SF", // Added place name
+      placeName: "Fisherman's Wharf, SF",
+      isPlantDisease: false,
+      reportDate: DateTime.now(),
     ),
     DiseasePoint(
       location: LatLng(37.7800, -122.4300),
@@ -41,22 +72,27 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
       cropType: "Potato",
       intensity: 0.9,
       caseCount: 15,
-      placeName: "Golden Gate Park, SF", // Added place name
+      placeName: "Golden Gate Park, SF",
+      isPlantDisease: true,
+      reportDate: DateTime.now(),
     ),
     DiseasePoint(
       location: LatLng(37.7700, -122.4250),
-      diseaseName: "Foot Rot",
-      cropType: "Rice",
+      diseaseName: "Avian Flu",
+      cropType: "Poultry",
       intensity: 0.4,
-      caseCount: 5,
-      placeName: "Mission District, SF", // Added place name
+      caseCount: 55,
+      placeName: "Mission District, SF",
+      isPlantDisease: false,
+      reportDate: DateTime.now(),
     ),
   ];
 
-  // Filter options
-  String _selectedDisease = 'All Diseases';
-  String _selectedCrop = 'All Crops';
-  String _selectedTimeframe = 'Last 7 Days';
+  // Simplified filter options
+  bool _showPlantDiseases =
+      true; // true for plant diseases, false for animal diseases
+  DateTime _selectedDate = DateTime.now();
+  bool _isLoading = true;
 
   // Disease types for filter
   final List<String> _diseaseTypes = [
@@ -86,530 +122,557 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
     'This Season'
   ];
 
+  // Add state variables for tracking card position
+  late Size _screenSize;
+  late Offset _cardPosition;
+  bool _isDragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _getCurrentLocation();
+    // Load static disease points for demo
+    _diseasePoints = List.from(_diseasePointsStatic);
+    // Initialize card position after frame is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _screenSize = MediaQuery.of(context).size;
+      setState(() {
+        _cardPosition =
+            Offset(_screenSize.width - 200, _screenSize.height - 150);
+      });
+    });
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isLoading = true);
+    try {
+      // Check location permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied');
+        }
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      // Get place name
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      setState(() {
+        _currentLocation = LatLng(position.latitude, position.longitude);
+        if (placemarks.isNotEmpty) {
+          _currentPlaceName =
+              "${placemarks.first.locality}, ${placemarks.first.administrativeArea}";
+        }
+        _isLoading = false;
+      });
+
+      // Move map to current location
+      _mapController.move(_currentLocation!, 13.0);
+    } catch (e) {
+      print('Error getting location: $e');
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: $e')),
+      );
+    }
+  }
+
+  void _addDiseasePoint(DiseasePoint point) {
+    setState(() {
+      _diseasePoints.add(point);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Community Disease Heatmap'),
+        backgroundColor: Colors.green[700],
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: () {
-              _showNotificationAlert(context);
-            },
+            icon: const Icon(Icons.refresh),
+            onPressed: _getCurrentLocation,
           ),
           IconButton(
             icon: const Icon(Icons.info),
-            onPressed: () {
-              _showInfoDialog(context);
-            },
+            onPressed: () => _showInfoDialog(context),
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildFilterBar(),
-          Expanded(
-            child: Stack(
+      body: _isLoading
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Colors.green),
+                  SizedBox(height: 16),
+                  Text('Loading map data...',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ],
+              ),
+            )
+          : Column(
               children: [
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: LatLng(37.7749, -122.4194),
-                    initialZoom: 13.0,
-                    onTap: (tapPosition, point) {
-                      _getLocationName(point);
-                    },
+                _buildFilterBar(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  color: Colors.grey[100],
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.location_on,
+                        color: Colors.green[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _currentPlaceName.isEmpty
+                            ? 'Loading location...'
+                            : _currentPlaceName,
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      _buildZoneLegend(),
+                    ],
                   ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      subdomains: ['a', 'b', 'c'],
-                      maxZoom: 19,
-                      userAgentPackageName: 'com.example.app',
-                      tileProvider: NetworkTileProvider(),
-                    ),
-                    // Circle markers for disease points - FIXED: Reduced opacity and size
-                    CircleLayer(
-                      circles: _getCircleMarkers(),
-                    ),
-                    // Location markers
-                    MarkerLayer(
-                      markers: _diseasePoints
-                          .where((point) =>
-                              (_selectedDisease == 'All Diseases' ||
-                                  point.diseaseName == _selectedDisease) &&
-                              (_selectedCrop == 'All Crops' ||
-                                  point.cropType == _selectedCrop))
-                          .map((point) {
-                        return Marker(
-                          point: point.location,
-                          width: 40.0,
-                          height: 40.0,
-                          child: GestureDetector(
-                            onTap: () {
-                              _showPointDetails(context, point);
-                            },
-                            child: Icon(
-                              Icons.location_on,
-                              color: _getMarkerColor(point.intensity),
-                              size: 40.0,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
                 ),
-                // Place name indicator
-                if (_currentPlaceName.isNotEmpty)
-                  Positioned(
-                    top: 10,
-                    left: 10,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.8),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                          initialCenter: _currentLocation ?? LatLng(0, 0),
+                          initialZoom: 13.0,
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            subdomains: ['a', 'b', 'c'],
+                          ),
+                          CircleLayer(
+                            circles: _getCircleMarkers(),
+                          ),
+                          if (_currentLocation != null)
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  point: _currentLocation!,
+                                  width: 40.0,
+                                  height: 40.0,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.withOpacity(0.7),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                          color: Colors.white, width: 2),
+                                    ),
+                                    child: const Icon(
+                                      Icons.my_location,
+                                      color: Colors.white,
+                                      size: 24.0,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          MarkerLayer(
+                            markers: _diseasePoints
+                                .where((point) =>
+                                    point.isPlantDisease ==
+                                        _showPlantDiseases &&
+                                    point.reportDate.year ==
+                                        _selectedDate.year &&
+                                    point.reportDate.month ==
+                                        _selectedDate.month)
+                                .map((point) => Marker(
+                                      point: point.location,
+                                      width: 60.0,
+                                      height: 60.0,
+                                      child: GestureDetector(
+                                        onTap: () =>
+                                            _showPointDetails(context, point),
+                                        child: Column(
+                                          children: [
+                                            Container(
+                                              padding: EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                color: _getMarkerColor(
+                                                        point.caseCount)
+                                                    .withOpacity(0.9),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black26,
+                                                    blurRadius: 3,
+                                                    offset: Offset(0, 2),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Icon(
+                                                point.isPlantDisease
+                                                    ? Icons.local_florist
+                                                    : Icons.pets,
+                                                color: Colors.white,
+                                                size: 24.0,
+                                              ),
+                                            ),
+                                            Container(
+                                              padding: EdgeInsets.symmetric(
+                                                  horizontal: 4, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black
+                                                    .withOpacity(0.6),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                '${point.caseCount}',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 10,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ))
+                                .toList(),
                           ),
                         ],
                       ),
-                      child: Text(
-                        _currentPlaceName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                      Positioned(
+                        left: _cardPosition.dx,
+                        top: _cardPosition.dy,
+                        child: Draggable(
+                          feedback: Material(
+                            color: Colors.transparent,
+                            child: Card(
+                              elevation: 8,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Opacity(
+                                opacity: 0.9,
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            'Disease Status',
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold),
+                                          ),
+                                          Icon(Icons.drag_indicator,
+                                              size: 16, color: Colors.grey),
+                                        ],
+                                      ),
+                                      SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Container(
+                                            width: 12,
+                                            height: 12,
+                                            decoration: BoxDecoration(
+                                              color: Colors.red,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          SizedBox(width: 4),
+                                          Text('Red Zone (50+ cases)'),
+                                        ],
+                                      ),
+                                      SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Container(
+                                            width: 12,
+                                            height: 12,
+                                            decoration: BoxDecoration(
+                                              color: Colors.amber,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          SizedBox(width: 4),
+                                          Text('Yellow Zone (<50 cases)'),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          childWhenDragging: SizedBox(),
+                          onDragStarted: () {
+                            setState(() {
+                              _isDragging = true;
+                            });
+                          },
+                          onDragEnd: (details) {
+                            setState(() {
+                              _isDragging = false;
+                              _cardPosition =
+                                  _getBoundedPosition(details.offset);
+                            });
+                          },
+                          child: Card(
+                            elevation: _isDragging ? 8 : 4,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Disease Status',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                      Icon(Icons.drag_indicator,
+                                          size: 16, color: Colors.grey),
+                                    ],
+                                  ),
+                                  SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text('Red Zone (50+ cases)'),
+                                    ],
+                                  ),
+                                  SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: Colors.amber,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      SizedBox(width: 4),
+                                      Text('Yellow Zone (<50 cases)'),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
-                Positioned(
-                  bottom: 100,
-                  right: 16,
-                  child: _buildLegend(),
-                ),
-                Positioned(
-                  top: 16,
-                  right: 16,
-                  child: _buildRiskMeter(0.7), // High risk example
-                ),
-                // Add map controls
-                Positioned(
-                  bottom: 200,
-                  right: 16,
-                  child: Column(
-                    children: [
-                      FloatingActionButton(
-                        heroTag: "zoom_in",
-                        mini: true,
-                        child: const Icon(Icons.add),
-                        onPressed: () {
-                          final currentZoom = _mapController.camera.zoom;
-                          _mapController.move(
-                              _mapController.camera.center, currentZoom + 1);
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      FloatingActionButton(
-                        heroTag: "zoom_out",
-                        mini: true,
-                        child: const Icon(Icons.remove),
-                        onPressed: () {
-                          final currentZoom = _mapController.camera.zoom;
-                          _mapController.move(
-                              _mapController.camera.center, currentZoom - 1);
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      FloatingActionButton(
-                        heroTag: "my_location",
-                        mini: true,
-                        child: const Icon(Icons.my_location),
-                        onPressed: () {
-                          // Would need location plugin to implement
-                          // For now just center on default location
-                          _mapController.move(LatLng(37.7749, -122.4194),
-                              _mapController.camera.zoom);
-                        },
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-          ),
-          _buildBottomPanel(),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.add_a_photo),
-        onPressed: () {
-          _showUploadDialog(context);
-        },
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showUploadDialog(context),
+        backgroundColor: Colors.green[700],
+        label: const Text('Report Disease'),
+        icon: const Icon(Icons.add_location),
       ),
     );
   }
 
-  // FIXED: Improved circle markers to prevent overlapping by adjusting opacity and Z-ordering
+  Widget _buildZoneLegend() {
+    return Row(
+      children: [
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.red,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            'Red Zone',
+            style: TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ),
+        SizedBox(width: 8),
+        Container(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.amber,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            'Yellow Zone',
+            style: TextStyle(color: Colors.black, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Update the circle markers based on new filters
   List<CircleMarker> _getCircleMarkers() {
-    // First sort by intensity so higher intensity circles appear on top
     final filteredPoints = _diseasePoints
         .where((point) =>
-            (_selectedDisease == 'All Diseases' ||
-                point.diseaseName == _selectedDisease) &&
-            (_selectedCrop == 'All Crops' || point.cropType == _selectedCrop))
+            point.isPlantDisease == _showPlantDiseases &&
+            point.reportDate.year == _selectedDate.year &&
+            point.reportDate.month == _selectedDate.month)
         .toList();
 
-    // Sort so smaller circles appear first (at bottom)
-    filteredPoints.sort((a, b) => a.intensity.compareTo(b.intensity));
-
     return filteredPoints.map((point) {
-      // Color based on intensity
-      Color circleColor = _getHeatColor(point.intensity);
+      // Use the case count to determine zone color (red or yellow)
+      Color circleColor = _getZoneColor(point.caseCount);
 
-      // Scale circle size based on case count but limit maximum size
-      double radius = 100 + (point.caseCount * 15);
+      // Scale radius based on case count
+      double radius = 100 + (point.caseCount * 5);
       if (radius > 400) radius = 400;
 
       return CircleMarker(
         point: point.location,
-        color: circleColor.withOpacity(0.3), // FIXED: Reduced opacity
-        borderColor:
-            circleColor.withOpacity(0.6), // FIXED: More transparent border
-        borderStrokeWidth: 1.5, // FIXED: Thinner border
+        color: circleColor.withOpacity(0.2),
+        borderColor: circleColor.withOpacity(0.7),
+        borderStrokeWidth: 2.0,
         radius: radius,
       );
     }).toList();
   }
 
-  Color _getHeatColor(double intensity) {
-    if (intensity > 0.7) {
-      return Colors.red;
-    } else if (intensity > 0.4) {
-      return Colors.orange;
-    } else {
-      return Colors.yellow;
-    }
+  // New method to determine zone color based on case count
+  Color _getZoneColor(int caseCount) {
+    // Red zone if cases >= 50, otherwise yellow zone
+    return caseCount >= 50 ? Colors.red : Colors.amber;
   }
 
-  Color _getMarkerColor(double intensity) {
-    if (intensity > 0.7) {
-      return Colors.red;
-    } else if (intensity > 0.4) {
-      return Colors.orange;
-    } else {
-      return Colors.amber;
-    }
-  }
-
-  // NEW: Method to get location name from coordinates
-  Future<void> _getLocationName(LatLng point) async {
-    try {
-      // In a real implementation, this would use the geocoding package
-      // For this demo, we'll simulate the lookup
-      String placeName = "";
-
-      // Find the closest known point
-      double minDistance = double.infinity;
-
-      for (var diseasePoint in _diseasePoints) {
-        final location = diseasePoint.location;
-        final distance = _calculateDistance(point, location);
-
-        if (distance < minDistance) {
-          minDistance = distance;
-          placeName = diseasePoint.placeName;
-        }
-      }
-
-      // If we're too far from any known point, generate a generic name
-      if (minDistance > 0.02) {
-        // Roughly 2km
-        placeName =
-            "Location (${point.latitude.toStringAsFixed(4)}, ${point.longitude.toStringAsFixed(4)})";
-      }
-
-      setState(() {
-        _currentPlaceName = placeName;
-      });
-
-      // Show the place name briefly, then hide it after 3 seconds
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          setState(() {
-            _currentPlaceName = "";
-          });
-        }
-      });
-    } catch (e) {
-      print("Error getting location name: $e");
-    }
-  }
-
-  // Helper method to calculate rough distance between points
-  double _calculateDistance(LatLng p1, LatLng p2) {
-    // Calculate squared distance
-    double squaredDistance =
-        (p1.latitude - p2.latitude) * (p1.latitude - p2.latitude) +
-            (p1.longitude - p2.longitude) * (p1.longitude - p2.longitude);
-
-    // Return the square root using dart:math
-    return sqrt(squaredDistance);
+  // Updated to use case count instead of intensity
+  Color _getMarkerColor(int caseCount) {
+    return caseCount >= 50 ? Colors.red : Colors.amber;
   }
 
   Widget _buildFilterBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: Colors.white,
-      child: Row(
-        children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              decoration: const InputDecoration(
-                labelText: 'Disease',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-              value: _selectedDisease,
-              items: _diseaseTypes
-                  .map((type) => DropdownMenuItem(
-                        value: type,
-                        child: Text(type),
-                      ))
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedDisease = value!;
-                });
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              decoration: const InputDecoration(
-                labelText: 'Crop',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-              value: _selectedCrop,
-              items: _cropTypes
-                  .map((type) => DropdownMenuItem(
-                        value: type,
-                        child: Text(type),
-                      ))
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedCrop = value!;
-                });
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              decoration: const InputDecoration(
-                labelText: 'Timeframe',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8),
-              ),
-              value: _selectedTimeframe,
-              items: _timeframes
-                  .map((type) => DropdownMenuItem(
-                        value: type,
-                        child: Text(type),
-                      ))
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedTimeframe = value!;
-                });
-              },
-            ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 4,
+            offset: Offset(0, 2),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildLegend() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Disease Activity',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Container(
-                    width: 20, height: 20, color: Colors.red.withOpacity(0.3)),
-                const SizedBox(width: 4),
-                const Text('High (>10 cases)'),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                Container(
-                    width: 20,
-                    height: 20,
-                    color: Colors.orange.withOpacity(0.3)),
-                const SizedBox(width: 4),
-                const Text('Medium (5-10 cases)'),
-              ],
-            ),
-            const SizedBox(height: 2),
-            Row(
-              children: [
-                Container(
-                    width: 20,
-                    height: 20,
-                    color: Colors.yellow.withOpacity(0.3)),
-                const SizedBox(width: 4),
-                const Text('Low (<5 cases)'),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRiskMeter(double riskLevel) {
-    Color riskColor;
-    String riskText;
-
-    if (riskLevel > 0.7) {
-      riskColor = Colors.red;
-      riskText = 'High Risk';
-    } else if (riskLevel > 0.4) {
-      riskColor = Colors.orange;
-      riskText = 'Medium Risk';
-    } else {
-      riskColor = Colors.green;
-      riskText = 'Low Risk';
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Current Risk Level',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Container(
-              width: 150,
-              height: 20,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                gradient: const LinearGradient(
-                  colors: [
-                    Colors.green,
-                    Colors.yellow,
-                    Colors.orange,
-                    Colors.red
-                  ],
-                ),
-              ),
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: 150 * riskLevel - 5,
-                    top: 0,
-                    child: Container(
-                      width: 10,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              riskText,
-              style: TextStyle(
-                color: riskColor,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomPanel() {
-    // Get the most significant disease point (highest case count)
-    if (_diseasePoints.isEmpty) {
-      return const SizedBox();
-    }
-
-    final sortedPoints = [..._diseasePoints]
-      ..sort((a, b) => b.caseCount.compareTo(a.caseCount));
-    final mostSignificant = sortedPoints.first;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      color: Colors.white,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              const Icon(Icons.warning, color: Colors.red),
-              const SizedBox(width: 8),
-              Text(
-                '${mostSignificant.diseaseName} Alert',
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              Expanded(
+                child: SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment<bool>(
+                      value: true,
+                      label: Text('Plant Disease'),
+                      icon: Icon(Icons.local_florist),
+                    ),
+                    ButtonSegment<bool>(
+                      value: false,
+                      label: Text('Animal Disease'),
+                      icon: Icon(Icons.pets),
+                    ),
+                  ],
+                  selected: {_showPlantDiseases},
+                  onSelectionChanged: (Set<bool> newSelection) {
+                    setState(() {
+                      _showPlantDiseases = newSelection.first;
+                    });
+                  },
+                  style: ButtonStyle(
+                    backgroundColor: MaterialStateProperty.resolveWith<Color>(
+                      (Set<MaterialState> states) {
+                        if (states.contains(MaterialState.selected)) {
+                          return Colors.green.shade100;
+                        }
+                        return Colors.transparent;
+                      },
+                    ),
+                  ),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            '${mostSignificant.caseCount} cases of ${mostSignificant.diseaseName} reported in ${mostSignificant.cropType} within 10km.',
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Recommendation: Apply fungicide within 24 hours to prevent spread.',
-            style: TextStyle(fontStyle: FontStyle.italic),
-          ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              OutlinedButton.icon(
-                icon: const Icon(Icons.navigation),
-                label: const Text('Route Planner'),
-                onPressed: () {
-                  // Route planner functionality
-                },
-              ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.info_outline),
-                label: const Text('Prevention Guide'),
-                onPressed: () {
-                  // Show prevention guide
-                },
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label: Text(
+                    '${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () async {
+                    final DateTime? picked = await showDatePicker(
+                      context: context,
+                      initialDate: _selectedDate,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now(),
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: ColorScheme.light(
+                              primary: Colors.green.shade700,
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (picked != null && picked != _selectedDate) {
+                      setState(() {
+                        _selectedDate = picked;
+                      });
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black87,
+                    elevation: 1,
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                ),
               ),
             ],
           ),
@@ -619,67 +682,114 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
   }
 
   void _showUploadDialog(BuildContext context) {
-    String selectedDisease = 'Leaf Spot';
-    String selectedCrop = 'Tomato';
+    String diseaseName = '';
+    String cropOrAnimalType = '';
+    int caseCount = 1;
+    String notes = '';
+    LatLng? selectedLocation = _currentLocation;
 
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Report Disease Case'),
+          title: Text(
+            _showPlantDiseases
+                ? 'Report Plant Disease'
+                : 'Report Animal Disease',
+            style: TextStyle(color: Colors.green[700]),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                    'Upload a picture of the infected plant/animal or select details below:'),
-                const SizedBox(height: 16),
-                Container(
-                  height: 150,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(8),
+                TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Disease Name',
+                    hintText: _showPlantDiseases
+                        ? 'e.g., Leaf Blight'
+                        : 'e.g., Foot and Mouth',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          BorderSide(color: Colors.green.shade700, width: 2),
+                    ),
                   ),
-                  child: const Center(
-                    child: Icon(Icons.add_photo_alternate, size: 50),
-                  ),
+                  onChanged: (value) => diseaseName = value,
                 ),
                 const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  decoration: const InputDecoration(labelText: 'Disease Type'),
-                  value: selectedDisease,
-                  items: _diseaseTypes
-                      .where((type) => type != 'All Diseases')
-                      .map((type) => DropdownMenuItem(
-                            value: type,
-                            child: Text(type),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    selectedDisease = value!;
-                  },
+                TextField(
+                  decoration: InputDecoration(
+                    labelText: _showPlantDiseases ? 'Crop Type' : 'Animal Type',
+                    hintText:
+                        _showPlantDiseases ? 'e.g., Rice' : 'e.g., Cattle',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          BorderSide(color: Colors.green.shade700, width: 2),
+                    ),
+                  ),
+                  onChanged: (value) => cropOrAnimalType = value,
                 ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  decoration:
-                      const InputDecoration(labelText: 'Crop/Animal Type'),
-                  value: selectedCrop,
-                  items: _cropTypes
-                      .where((type) => type != 'All Crops')
-                      .map((type) => DropdownMenuItem(
-                            value: type,
-                            child: Text(type),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    selectedCrop = value!;
-                  },
+                const SizedBox(height: 16),
+                TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Number of Cases',
+                    hintText: 'Enter number of affected plants/animals',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          BorderSide(color: Colors.green.shade700, width: 2),
+                    ),
+                    helperText: 'Cases ≥ 50 will be marked as Red Zone',
+                  ),
+                  keyboardType: TextInputType.number,
+                  onChanged: (value) => caseCount = int.tryParse(value) ?? 1,
                 ),
-                const SizedBox(height: 8),
-                CheckboxListTile(
-                  title: const Text('Use my current location'),
-                  value: true,
-                  onChanged: (value) {},
+                const SizedBox(height: 16),
+                TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Notes',
+                    hintText: 'Add any additional information',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          BorderSide(color: Colors.green.shade700, width: 2),
+                    ),
+                  ),
+                  maxLines: 3,
+                  onChanged: (value) => notes = value,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.my_location),
+                  label: const Text('Use Current Location'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade700,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                  onPressed: () async {
+                    await _getCurrentLocation();
+                    selectedLocation = _currentLocation;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Current location set'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -687,181 +797,337 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
           actions: [
             TextButton(
               child: const Text('Cancel'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.pop(context),
             ),
             ElevatedButton(
-              child: const Text('Upload'),
+              child: const Text('Submit'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[700],
+              ),
               onPressed: () {
-                // Handle the upload logic
+                if (diseaseName.isEmpty ||
+                    cropOrAnimalType.isEmpty ||
+                    selectedLocation == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Please fill all required fields')),
+                  );
+                  return;
+                }
+
+                // Calculate intensity based on case count
+                double intensity = caseCount >= 50 ? 0.9 : caseCount / 60.0;
+                if (intensity > 1.0) intensity = 1.0;
+
+                final newPoint = DiseasePoint(
+                  location: selectedLocation!,
+                  diseaseName: diseaseName,
+                  cropType: cropOrAnimalType,
+                  intensity: intensity,
+                  caseCount: caseCount,
+                  placeName: _currentPlaceName,
+                  isPlantDisease: _showPlantDiseases,
+                  notes: notes,
+                  reportDate: _selectedDate,
+                );
+
+                _addDiseasePoint(newPoint);
+                Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Disease report uploaded successfully!'),
-                    backgroundColor: Colors.green,
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.white),
+                        SizedBox(width: 8),
+                        Text('Disease report submitted successfully'),
+                      ],
+                    ),
+                    backgroundColor:
+                        caseCount >= 50 ? Colors.red : Colors.amber,
                   ),
                 );
-                Navigator.of(context).pop();
               },
             ),
           ],
-        );
-      },
-    );
-  }
-
-  void _showNotificationAlert(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Disease Alerts'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.warning, color: Colors.red),
-                title: const Text('Early Blight Alert'),
-                subtitle:
-                    const Text('15 new cases in your area within 24 hours'),
-                trailing: const Text('1h ago'),
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.warning, color: Colors.orange),
-                title: const Text('Leaf Spot Alert'),
-                subtitle: const Text('7 new cases in nearby tomato farms'),
-                trailing: const Text('5h ago'),
-              ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.warning, color: Colors.yellow),
-                title: const Text('Foot Rot Update'),
-                subtitle: const Text('Decreasing trend in your region'),
-                trailing: const Text('1d ago'),
-              ),
-            ],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          actions: [
-            TextButton(
-              child: const Text('Close'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            TextButton(
-              child: const Text('View All'),
-              onPressed: () {
-                Navigator.of(context).pop();
-                // Navigate to notifications page
-              },
-            ),
-          ],
         );
       },
     );
   }
 
-  // FIXED: Modified to include place name
+  // Enhanced disease point details with improved UI
   void _showPointDetails(BuildContext context, DiseasePoint point) {
+    // Determine if this is a red or yellow zone
+    final bool isRedZone = point.caseCount >= 50;
+
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('${point.diseaseName} Details'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Location: ${point.placeName}'), // Added place name
-              Text('Crop Type: ${point.cropType}'),
-              Text('Reported Cases: ${point.caseCount}'),
-              Text('Severity: ${(point.intensity * 100).toInt()}%'),
-              const SizedBox(height: 10),
-              const Text('Common Symptoms:'),
-              const Text('• Yellow/brown spots on leaves'),
-              const Text('• Wilting of plant parts'),
-              const Text('• Reduced yield potential'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Close'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isRedZone ? Colors.red : Colors.amber,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                point.isPlantDisease ? Icons.local_florist : Icons.pets,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
-            ElevatedButton(
-              child: const Text('Treatment Guide'),
-              onPressed: () {
-                Navigator.of(context).pop();
-                // Show treatment guide
-              },
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    point.diseaseName,
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    isRedZone ? 'RED ZONE' : 'YELLOW ZONE',
+                    style: TextStyle(
+                      color: isRedZone ? Colors.red : Colors.amber.shade800,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
-        );
-      },
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Card(
+              elevation: 0,
+              color: Colors.grey.shade100,
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.location_on,
+                            size: 16, color: Colors.grey[700]),
+                        SizedBox(width: 8),
+                        Expanded(child: Text('Location: ${point.placeName}')),
+                      ],
+                    ),
+                    Divider(),
+                    Row(
+                      children: [
+                        Icon(
+                          point.isPlantDisease ? Icons.grass : Icons.pets,
+                          size: 16,
+                          color: Colors.grey[700],
+                        ),
+                        SizedBox(width: 8),
+                        Text(point.isPlantDisease
+                            ? 'Crop: ${point.cropType}'
+                            : 'Animal: ${point.cropType}'),
+                      ],
+                    ),
+                    Divider(),
+                    Row(
+                      children: [
+                        Icon(Icons.warning_amber,
+                            size: 16,
+                            color: isRedZone ? Colors.red : Colors.amber),
+                        SizedBox(width: 8),
+                        Text(
+                          'Cases: ${point.caseCount}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color:
+                                isRedZone ? Colors.red : Colors.amber.shade800,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Divider(),
+                    Row(
+                      children: [
+                        Icon(Icons.calendar_today,
+                            size: 16, color: Colors.grey[700]),
+                        SizedBox(width: 8),
+                        Text(
+                            'Report Date: ${point.reportDate.day}/${point.reportDate.month}/${point.reportDate.year}'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (point.notes.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Notes:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 4),
+              Text(point.notes),
+            ],
+            SizedBox(height: 16),
+            Center(
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isRedZone ? Colors.red.shade50 : Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isRedZone ? Colors.red : Colors.amber,
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  isRedZone
+                      ? 'High Risk Area - Take Precautions'
+                      : 'Moderate Risk Area - Monitor Situation',
+                  style: TextStyle(
+                    color:
+                        isRedZone ? Colors.red.shade900 : Colors.amber.shade900,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            icon: Icon(Icons.share),
+            label: Text('Share'),
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Sharing disease information...')),
+              );
+            },
+          ),
+          ElevatedButton(
+            child: const Text('Close'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green[700],
+            ),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
     );
   }
 
   void _showInfoDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('About Community Disease Heatmap'),
-          content: const SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Community Disease Heatmap adds real-time intelligence to help you see where and how plant or animal diseases are spreading. This is super useful for prevention, planning, and awareness.',
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.green[700]),
+            SizedBox(width: 8),
+            Text('Disease Zone Information'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Card(
+              color: Colors.red.shade50,
+              margin: EdgeInsets.only(bottom: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            "R",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'RED ZONE (50+ cases)',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'About Disease Zones',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Disease zones are determined by the number of reported cases:',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            '• Red Zone: 50 or more cases\n• Yellow Zone: Less than 50 cases',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                SizedBox(height: 16),
-                Text('Features:',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                SizedBox(height: 8),
-                Text('• View disease hotspots in real-time'),
-                Text('• Upload disease cases with photos'),
-                Text('• Receive alerts for nearby threats'),
-                Text('• Filter by disease type, crop and time period'),
-                Text('• Access prevention guides and recommendations'),
-                SizedBox(height: 16),
-                Text('Map data © OpenStreetMap contributors'),
-                Text('App Version: 1.0.0'),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              child: const Text('Close'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              ),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
-}
 
-// Updated DiseasePoint class to include place name
-class DiseasePoint {
-  final LatLng location;
-  final String diseaseName;
-  final String cropType;
-  final double intensity; // 0.0 to 1.0
-  final int caseCount; // Number of reported cases
-  final String placeName; // Added place name field
+  // Add method to keep card within bounds
+  Offset _getBoundedPosition(Offset position) {
+    final cardWidth = 200.0; // Approximate card width
+    final cardHeight = 120.0; // Approximate card height
 
-  DiseasePoint({
-    required this.location,
-    required this.diseaseName,
-    required this.cropType,
-    required this.intensity,
-    required this.caseCount,
-    this.placeName = "", // Default empty string
-  });
+    double dx = position.dx;
+    double dy = position.dy;
+
+    // Constrain x position
+    dx = dx.clamp(0, _screenSize.width - cardWidth);
+    // Constrain y position
+    dy = dy.clamp(0, _screenSize.height - cardHeight);
+
+    return Offset(dx, dy);
+  }
 }

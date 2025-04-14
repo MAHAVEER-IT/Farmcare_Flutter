@@ -4,6 +4,7 @@ import 'package:farmcare/utils/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'Blog/Blog_UI.dart';
 import 'Chat/doctors_page.dart';
 import 'Help/Help_page.dart';
 import 'Map_diseise/Dedict_desisease.dart';
@@ -133,7 +134,12 @@ class _CustomDrawerState extends State<CustomDrawer> {
                 _buildDrawerItem(
                   Icons.home,
                   _getTranslatedText('home'),
-                  onTap: () => Navigator.pushReplacementNamed(context, '/home'),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => Blog(),
+                    ),
+                  ),
                 ),
                 _buildDrawerItem(
                   Icons.create_outlined,

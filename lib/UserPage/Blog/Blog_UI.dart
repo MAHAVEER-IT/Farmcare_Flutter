@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:farmcare/UserPage/Blog/Blog_services.dart';
 import 'package:farmcare/UserPage/Blog/Create_Blog/create_blog_ui.dart';
 import 'package:farmcare/UserPage/Blog/Widgets/comment_dialog.dart';
@@ -6,6 +8,7 @@ import 'package:farmcare/UserPage/Drawer.dart';
 import 'package:farmcare/utils/app_localizations.dart';
 import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,8 +18,8 @@ import 'Weather_detail.dart';
 class BlogPost {
   final String id;
   final String postId;
-  final String title;
-  final String content;
+  String title; // Changed to non-final to allow translation
+  String content; // Changed to non-final to allow translation
   final List<String> images;
   final String authorName;
   final String postType;
@@ -26,12 +29,14 @@ class BlogPost {
   int commentCount;
   final DateTime createdAt;
   final DateTime updatedAt;
+  String originalTitle; // Store original title
+  String originalContent; // Store original content
 
   BlogPost({
     required this.id,
     required this.postId,
-    required this.title,
-    required this.content,
+    required String title,
+    required String content,
     required this.images,
     required this.authorName,
     required this.postType,
@@ -41,7 +46,10 @@ class BlogPost {
     required this.commentCount,
     required this.createdAt,
     required this.updatedAt,
-  });
+  })  : originalTitle = title,
+        originalContent = content,
+        title = title,
+        content = content;
 
   factory BlogPost.fromJson(Map<String, dynamic> json) {
     // Base URL for images
@@ -97,6 +105,12 @@ class BlogPost {
       'updatedAt': updatedAt.toIso8601String(),
     };
   }
+
+  // Reset the post content to original language
+  void resetToOriginal() {
+    title = originalTitle;
+    content = originalContent;
+  }
 }
 
 class Blog extends StatefulWidget {
@@ -116,6 +130,16 @@ class _BlogState extends State<Blog> {
   Map<String, dynamic>? _weatherData;
   bool _loadingWeather = true;
   bool _isAuthenticated = false;
+  bool _translating = false;
+
+  // Language selection
+  String _currentLanguage = 'en'; // Default to English
+  final List<Map<String, String>> _languages = [
+    {'code': 'en', 'name': 'English'},
+    {'code': 'ta', 'name': 'தமிழ்'},
+    {'code': 'hi', 'name': 'हिन्दी'},
+    {'code': 'ml', 'name': 'മലയാളം'},
+  ];
 
   // Add this list of default farming images
   final List<String> _defaultFarmImages = [
@@ -173,8 +197,6 @@ class _BlogState extends State<Blog> {
           _isAuthenticated = false;
           _error = 'Please login to view posts';
         });
-        // Handle navigation to login
-        // Navigator.pushReplacementNamed(context, '/login');
       } else {
         setState(() {
           _error = 'Failed to load posts. Please try again.';
@@ -184,11 +206,146 @@ class _BlogState extends State<Blog> {
     }
   }
 
+  // Function to translate text
+  Future<String> _translateText(String text, String targetLang) async {
+    if (text.isEmpty || targetLang == 'en') {
+      return text;
+    }
+
+    try {
+      // Make API call to MyMemory translation service
+      final url = Uri.parse(
+          'https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(text)}&langpair=en|$targetLang');
+
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['responseStatus'] == 200 && data['responseData'] != null) {
+          return data['responseData']['translatedText'];
+        }
+      }
+
+      // Return original text if translation fails
+      return text;
+    } catch (e) {
+      print('Translation error: $e');
+      return text;
+    }
+  }
+
+  // Function to translate all posts
+  Future<void> _translatePosts(String langCode) async {
+    if (langCode == 'en') {
+      // Reset all posts to original language
+      setState(() {
+        for (var post in _blogPosts) {
+          post.resetToOriginal();
+        }
+      });
+      return;
+    }
+
+    setState(() {
+      _translating = true;
+    });
+
+    try {
+      // Create a copy of blog posts for translation
+      List<BlogPost> translatedPosts = List.from(_blogPosts);
+
+      // Translate each post
+      for (var post in translatedPosts) {
+        // Translate title
+        String translatedTitle =
+            await _translateText(post.originalTitle, langCode);
+
+        // Translate content
+        String translatedContent =
+            await _translateText(post.originalContent, langCode);
+
+        // Update post if translation was successful
+        if (mounted) {
+          setState(() {
+            post.title = translatedTitle;
+            post.content = translatedContent;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error during translation: $e');
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Translation failed. Please try again later.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _translating = false;
+        });
+      }
+    }
+  }
+
+  // Show language selection dialog
+  void _showLanguageDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(AppLocalizations.translate(
+            'selectLanguage',
+            Provider.of<LanguageProvider>(context).currentLanguage,
+          )),
+          content: Container(
+            width: double.minPositive,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: _languages.map((language) {
+                return ListTile(
+                  title: Text(language['name']!),
+                  leading: Radio<String>(
+                    value: language['code']!,
+                    groupValue: _currentLanguage,
+                    onChanged: (String? value) {
+                      Navigator.pop(context);
+                      if (value != null && value != _currentLanguage) {
+                        setState(() {
+                          _currentLanguage = value;
+                        });
+                        _translatePosts(value);
+                      }
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: Text(AppLocalizations.translate(
+                'cancel',
+                Provider.of<LanguageProvider>(context).currentLanguage,
+              )),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _handleRefresh() async {
     if (!_isAuthenticated) {
       await _checkAuthentication();
     } else {
       await _fetchPosts();
+      if (_currentLanguage != 'en') {
+        await _translatePosts(_currentLanguage);
+      }
     }
   }
 
@@ -250,6 +407,7 @@ class _BlogState extends State<Blog> {
         backgroundColor: Colors.green.shade800,
         elevation: 0,
         title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(
               child: Center(
@@ -300,6 +458,15 @@ class _BlogState extends State<Blog> {
         centerTitle: true,
       ),
       drawer: CustomDrawer(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showLanguageDialog,
+        tooltip: 'Change Language',
+        backgroundColor: Colors.green.shade800,
+        child: Icon(
+          Icons.language,
+          color: Colors.white,
+        ),
+      ),
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -313,10 +480,27 @@ class _BlogState extends State<Blog> {
             end: Alignment.bottomRight,
           ),
         ),
-        child: RefreshIndicator(
-          onRefresh: _handleRefresh,
-          child: _buildBody(context),
-        ),
+        child: _translating
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 20),
+                    Text(
+                      'Translating content...',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : RefreshIndicator(
+                onRefresh: _handleRefresh,
+                child: _buildBody(context),
+              ),
       ),
     );
   }
@@ -448,6 +632,11 @@ class _BlogState extends State<Blog> {
     if (result == true) {
       setState(() => _isLoading = true); // Show loading indicator
       await _fetchPosts(); // Fetch new posts
+
+      // Re-translate posts if not in English
+      if (_currentLanguage != 'en') {
+        await _translatePosts(_currentLanguage);
+      }
     }
   }
 
@@ -520,7 +709,6 @@ class _BlogState extends State<Blog> {
                       CircleAvatar(
                         radius: 20,
                         backgroundImage: NetworkImage(
-                          // Use authorName instead of title
                           "https://ui-avatars.com/api/?name=${Uri.encodeComponent(post.authorName.replaceAll(' ', '+'))}",
                         ),
                       ),
@@ -529,7 +717,7 @@ class _BlogState extends State<Blog> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            post.authorName, // Show authorName instead of title
+                            post.authorName,
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                             ),
@@ -547,7 +735,7 @@ class _BlogState extends State<Blog> {
                   ),
                   SizedBox(height: 12),
                   Text(
-                    post.title, // Add title
+                    post.title,
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,

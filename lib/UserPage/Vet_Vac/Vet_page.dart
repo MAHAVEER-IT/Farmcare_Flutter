@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:farmcare/UserPage/Vet_Vac/pet_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:timezone/data/latest.dart' as tz;
-import 'package:timezone/timezone.dart' as tz;
+
+import 'Vaccine_Model.dart';
+import 'add_new_pet_page.dart';
 
 class PetVaccinationApp extends StatelessWidget {
   const PetVaccinationApp({super.key});
@@ -15,6 +16,7 @@ class PetVaccinationApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Pet Care Companion',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -38,8 +40,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
   late List<Pet> pets = [];
   late AnimationController _fabAnimationController;
 
@@ -50,7 +50,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 500),
     );
-    _initializeNotifications();
     _loadPets();
     _fabAnimationController.forward();
   }
@@ -71,35 +70,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _initializeNotifications() async {
-    tz.initializeTimeZones();
-
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-
-    const DarwinInitializationSettings initializationSettingsIOS =
-        DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
-    );
-
-    const InitializationSettings initializationSettings =
-        InitializationSettings(
-      android: initializationSettingsAndroid,
-      iOS: initializationSettingsIOS,
-    );
-
-    await flutterLocalNotificationsPlugin.initialize(initializationSettings);
-  }
+  final PetService _petService = PetService();
 
   Future<void> _loadPets() async {
-    final prefs = await SharedPreferences.getInstance();
-    final petsJson = prefs.getStringList('pets') ?? [];
-    setState(() {
-      pets = petsJson.map((json) => Pet.fromJson(jsonDecode(json))).toList();
-    });
-    _checkUpcomingVaccinations();
+    try {
+      final fetchedPets = await _petService.getPets();
+      setState(() {
+        pets = fetchedPets;
+      });
+      _checkUpcomingVaccinations();
+    } catch (e) {
+      print('Error loading pets: $e');
+      // Handle error state
+    }
   }
 
   Future<void> _savePets() async {
@@ -116,9 +99,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       List<Vaccination> toAdd = [];
       for (var vaccine in pet.vaccinations) {
         // Schedule notification
-        if (vaccine.dueDate.isAfter(now)) {
-          _scheduleNotification(pet, vaccine);
-        }
+        if (vaccine.dueDate.isAfter(now)) {}
 
         // Handle recurring vaccines
         if (vaccine.isRecurring && vaccine.dueDate.isBefore(now)) {
@@ -142,41 +123,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (updated) _savePets();
   }
 
-  Future<void> _scheduleNotification(Pet pet, Vaccination vaccine) async {
-    final androidDetails = const AndroidNotificationDetails(
-      'vaccine_channel',
-      'Vaccine Reminders',
-      importance: Importance.high,
-      priority: Priority.max,
-    );
-
-    const iosDetails = DarwinNotificationDetails();
-
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-      vaccine.id.hashCode,
-      '${pet.name} Vaccine Reminder',
-      '${vaccine.name} is due on ${DateFormat.MMMd().format(vaccine.dueDate)}',
-      tz.TZDateTime.from(
-          vaccine.dueDate.subtract(const Duration(days: 3)), tz.local),
-      NotificationDetails(android: androidDetails, iOS: iosDetails),
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-    );
-  }
-
   void _addNewPet() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => AddPetScreen(
-          onPetAdded: (newPet) {
-            setState(() {
-              pets.add(newPet);
-              _savePets();
-            });
+          onPetAdded: (newPet) async {
+            final savedPet = await _petService.createPet(newPet);
+            if (savedPet != null) {
+              setState(() {
+                pets.add(savedPet);
+              });
+            }
           },
         ),
       ),
     );
+    _loadPets();
   }
 
   @override
@@ -241,12 +204,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       MaterialPageRoute(
         builder: (context) => PetDetailScreen(
           pet: pet,
-          onUpdate: (updatedPet) {
-            setState(() {
-              final index = pets.indexWhere((p) => p.id == updatedPet.id);
-              pets[index] = updatedPet;
-              _savePets();
-            });
+          onUpdate: (updatedPet) async {
+            final savedPet = await _petService.updatePet(updatedPet);
+            if (savedPet != null) {
+              setState(() {
+                final index = pets.indexWhere((p) => p.id == updatedPet.id);
+                if (index != -1) {
+                  pets[index] = savedPet;
+                }
+              });
+            }
           },
           onDelete: () => Navigator.pop(context),
           sendSMS: sendSMS,
@@ -255,30 +222,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  void _deletePet(int index) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove Pet'),
-        content: Text('Are you sure you want to remove ${pets[index].name}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                pets.removeAt(index);
-                _savePets();
-              });
-              Navigator.pop(context);
-            },
-            child: const Text('Remove', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
+  void _deletePet(int index) async {
+    final petToDelete = pets[index];
+    final success = await _petService.deletePet(petToDelete.id);
+
+    if (success) {
+      setState(() {
+        pets.removeAt(index);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pet deleted successfully'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to delete pet'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _showNotificationsSettings(BuildContext context) {
@@ -378,14 +343,14 @@ class _PetAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     IconData icon;
     switch (type.toLowerCase()) {
-      case 'dog':
+      case 'cow':
         icon = Icons.pets;
         break;
-      case 'cat':
-        icon = Icons.catching_pokemon;
+      case 'goat':
+        icon = Icons.pets;
         break;
-      case 'bird':
-        icon = Icons.air;
+      case 'chicken':
+        icon = Icons.pets;
         break;
       default:
         icon = Icons.help_outline;
@@ -396,147 +361,6 @@ class _PetAvatar extends StatelessWidget {
       backgroundColor: Colors.teal.shade100,
       child: Icon(icon, size: size * 0.6, color: Colors.teal.shade700),
     );
-  }
-}
-
-class AddPetScreen extends StatefulWidget {
-  final Function(Pet) onPetAdded;
-
-  const AddPetScreen({super.key, required this.onPetAdded});
-
-  @override
-  State<AddPetScreen> createState() => _AddPetScreenState();
-}
-
-class _AddPetScreenState extends State<AddPetScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _breedController = TextEditingController();
-  final _vetNameController = TextEditingController();
-  final _vetPhoneController = TextEditingController();
-  DateTime _birthDate = DateTime.now().subtract(const Duration(days: 365));
-  String _petType = 'Dog';
-  final List<String> _petTypes = ['Dog', 'Cat', 'Bird', 'Other'];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Add New Pet')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              _buildTextField(_nameController, 'Pet Name', Icons.pets),
-              const SizedBox(height: 20),
-              _buildTypeDropdown(),
-              const SizedBox(height: 20),
-              _buildBirthDatePicker(),
-              const SizedBox(height: 20),
-              _buildTextField(_breedController, 'Breed', Icons.flag),
-              const SizedBox(height: 20),
-              _buildTextField(_vetNameController, 'Vet Name', Icons.person),
-              const SizedBox(height: 20),
-              _buildTextField(
-                _vetPhoneController,
-                'Vet Phone',
-                Icons.phone,
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 40),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.save),
-                label: const Text('Save Pet Profile'),
-                style: ElevatedButton.styleFrom(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 16, horizontal: 32),
-                ),
-                onPressed: _submitForm,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField(
-      TextEditingController controller, String label, IconData icon,
-      {TextInputType? keyboardType}) {
-    return TextFormField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-      keyboardType: keyboardType,
-      validator: (value) => value!.isEmpty ? 'Required field' : null,
-    );
-  }
-
-  Widget _buildTypeDropdown() {
-    return DropdownButtonFormField<String>(
-      value: _petType,
-      decoration: InputDecoration(
-        labelText: 'Pet Type',
-        prefixIcon: const Icon(Icons.category),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-      items: _petTypes
-          .map((type) => DropdownMenuItem(
-                value: type,
-                child: Text(type),
-              ))
-          .toList(),
-      onChanged: (value) => setState(() => _petType = value!),
-    );
-  }
-
-  Widget _buildBirthDatePicker() {
-    return InkWell(
-      onTap: () async {
-        final date = await showDatePicker(
-          context: context,
-          initialDate: _birthDate,
-          firstDate: DateTime(2000),
-          lastDate: DateTime.now(),
-        );
-        if (date != null) setState(() => _birthDate = date);
-      },
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: 'Birth Date',
-          prefixIcon: const Icon(Icons.cake),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(DateFormat.yMMMd().format(_birthDate)),
-            const Icon(Icons.calendar_today),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _submitForm() {
-    if (_formKey.currentState!.validate()) {
-      final newPet = Pet(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: _nameController.text,
-        type: _petType,
-        breed: _breedController.text,
-        birthDate: _birthDate,
-        vetName: _vetNameController.text,
-        vetPhone: _vetPhoneController.text,
-        vaccinations: [],
-      );
-      widget.onPetAdded(newPet);
-      Navigator.pop(context);
-    }
   }
 }
 
@@ -560,6 +384,7 @@ class PetDetailScreen extends StatefulWidget {
 
 class _PetDetailScreenState extends State<PetDetailScreen> {
   late Pet pet;
+  final PetService _petService = PetService();
 
   @override
   void initState() {
@@ -581,43 +406,68 @@ class _PetDetailScreenState extends State<PetDetailScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(pet.name),
+        elevation: 0,
+        backgroundColor: Theme.of(context).primaryColor,
+        foregroundColor: Colors.white,
+        title: Text(
+          pet.name,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.edit),
+            icon: const Icon(Icons.edit_rounded),
             onPressed: _editPetProfile,
+            tooltip: 'Edit Profile',
           ),
         ],
       ),
       body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
             child: _PetProfileHeader(pet: pet),
           ),
           SliverPadding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                _buildSectionTitle('Upcoming Vaccinations'),
-                ..._buildVaccineList(upcomingVaccines),
-                _buildSectionTitle('Vaccination History'),
-                ..._buildVaccineList(pastVaccines, isPast: true),
+                _buildSectionTitle(
+                    'Upcoming Vaccinations', Icons.event_available),
+                ...(_buildVaccineList(upcomingVaccines)),
+                const SizedBox(height: 8),
+                _buildSectionTitle('Vaccination History', Icons.history),
+                ...(_buildVaccineList(pastVaccines, isPast: true)),
               ]),
             ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: _addVaccination,
-        child: const Icon(Icons.add),
+        backgroundColor: Theme.of(context).colorScheme.secondary,
+        label: const Text('Add Vaccination'),
+        icon: const Icon(Icons.add),
+        elevation: 4,
       ),
     );
   }
 
-  Widget _buildSectionTitle(String title) {
+  Widget _buildSectionTitle(String title, IconData icon) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+      child: Row(
+        children: [
+          Icon(icon, color: Theme.of(context).primaryColor),
+          const SizedBox(width: 10),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).primaryColor,
+                ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -625,9 +475,36 @@ class _PetDetailScreenState extends State<PetDetailScreen> {
       {bool isPast = false}) {
     if (vaccines.isEmpty) {
       return [
-        const ListTile(
-          title: Text('No vaccinations found'),
-          leading: Icon(Icons.info),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.info_outline,
+                color: Colors.grey.shade500,
+                size: 28,
+              ),
+              const SizedBox(width: 16),
+              Text(
+                'No vaccinations found',
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
         )
       ];
     }
@@ -646,148 +523,189 @@ class _PetDetailScreenState extends State<PetDetailScreen> {
       context: context,
       builder: (context) => VaccineDialog(
         onSave: (newVaccine) async {
-          setState(() {
-            pet.vaccinations.add(newVaccine);
+          final updatedPet =
+              await _petService.addVaccination(pet.id, newVaccine);
+          if (updatedPet != null) {
+            setState(() {
+              pet = updatedPet;
+            });
             widget.onUpdate(pet);
-          });
 
-          if (pet.vetPhone.isEmpty) {
+            if (pet.vetPhone.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                      'Veterinarian phone number is missing. SMS not sent.'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              return;
+            }
+
+            final message = 'New vaccination scheduled for ${pet.name}: '
+                '${newVaccine.name} due on ${DateFormat.yMMMd().format(newVaccine.dueDate)}. '
+                'Notes: ${newVaccine.notes.isNotEmpty ? newVaccine.notes : "None"}';
+
+            final success = await widget.sendSMS(pet.vetPhone, message);
+
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content:
-                    Text('Veterinarian phone number is missing. SMS not sent.'),
+              SnackBar(
+                content: Text(
+                  success
+                      ? 'SMS reminder sent to veterinarian!'
+                      : 'Failed to send SMS reminder',
+                ),
+                backgroundColor:
+                    success ? Colors.green.shade600 : Colors.red.shade600,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
               ),
             );
-            return;
           }
-
-          final message = 'New vaccination scheduled for ${pet.name}: '
-              '${newVaccine.name} due on ${DateFormat.yMMMd().format(newVaccine.dueDate)}. '
-              'Notes: ${newVaccine.notes.isNotEmpty ? newVaccine.notes : "None"}';
-
-          final success = await widget.sendSMS(pet.vetPhone, message);
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                success
-                    ? 'SMS reminder sent to veterinarian!'
-                    : 'Failed to send SMS reminder',
-              ),
-              backgroundColor: success ? Colors.green : Colors.red,
-            ),
-          );
         },
       ),
     );
   }
 
-  void _deleteVaccination(Vaccination vaccine) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Vaccination'),
-        content: const Text('Are you sure you want to delete this record?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                pet.vaccinations.remove(vaccine);
-                widget.onUpdate(pet);
-                Navigator.pop(context);
-              });
-            },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
+  void _deleteVaccination(Vaccination vaccine) async {
+    final updatedPet = await _petService.deleteVaccination(pet.id, vaccine.id);
+    if (updatedPet != null) {
+      setState(() {
+        pet = updatedPet;
+      });
+      widget.onUpdate(pet);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vaccination deleted successfully'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to delete vaccination'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _editPetProfile() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Edit Pet Profile'),
+        title: Row(
+          children: [
+            Icon(Icons.edit, color: Theme.of(context).primaryColor),
+            const SizedBox(width: 10),
+            const Text('Edit Pet Profile'),
+          ],
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: TextEditingController(text: pet.name),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Pet Name',
-                  icon: Icon(Icons.pets),
+                  icon: const Icon(Icons.pets),
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
                 ),
-                onChanged: (value) => pet = Pet(
-                  id: pet.id,
-                  name: value,
-                  type: pet.type,
-                  breed: pet.breed,
-                  birthDate: pet.birthDate,
-                  vetName: pet.vetName,
-                  vetPhone: pet.vetPhone,
-                  vaccinations: pet.vaccinations,
-                ),
+                onChanged: (value) => setState(() {
+                  pet = Pet(
+                    id: pet.id,
+                    name: value,
+                    type: pet.type,
+                    breed: pet.breed,
+                    birthDate: pet.birthDate,
+                    vetName: pet.vetName,
+                    vetPhone: pet.vetPhone,
+                    vaccinations: pet.vaccinations,
+                  );
+                }),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: TextEditingController(text: pet.breed),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Breed',
-                  icon: Icon(Icons.flag),
+                  icon: const Icon(Icons.category),
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
                 ),
-                onChanged: (value) => pet = Pet(
-                  id: pet.id,
-                  name: pet.name,
-                  type: pet.type,
-                  breed: value,
-                  birthDate: pet.birthDate,
-                  vetName: pet.vetName,
-                  vetPhone: pet.vetPhone,
-                  vaccinations: pet.vaccinations,
-                ),
+                onChanged: (value) => setState(() {
+                  pet = Pet(
+                    id: pet.id,
+                    name: pet.name,
+                    type: pet.type,
+                    breed: value,
+                    birthDate: pet.birthDate,
+                    vetName: pet.vetName,
+                    vetPhone: pet.vetPhone,
+                    vaccinations: pet.vaccinations,
+                  );
+                }),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: TextEditingController(text: pet.vetName),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Vet Name',
-                  icon: Icon(Icons.person),
+                  icon: const Icon(Icons.medical_services),
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
                 ),
-                onChanged: (value) => pet = Pet(
-                  id: pet.id,
-                  name: pet.name,
-                  type: pet.type,
-                  breed: pet.breed,
-                  birthDate: pet.birthDate,
-                  vetName: value,
-                  vetPhone: pet.vetPhone,
-                  vaccinations: pet.vaccinations,
-                ),
+                onChanged: (value) => setState(() {
+                  pet = Pet(
+                    id: pet.id,
+                    name: pet.name,
+                    type: pet.type,
+                    breed: pet.breed,
+                    birthDate: pet.birthDate,
+                    vetName: value,
+                    vetPhone: pet.vetPhone,
+                    vaccinations: pet.vaccinations,
+                  );
+                }),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: TextEditingController(text: pet.vetPhone),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Vet Phone',
-                  icon: Icon(Icons.phone),
+                  icon: const Icon(Icons.phone),
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
                 ),
                 keyboardType: TextInputType.phone,
-                onChanged: (value) => pet = Pet(
-                  id: pet.id,
-                  name: pet.name,
-                  type: pet.type,
-                  breed: pet.breed,
-                  birthDate: pet.birthDate,
-                  vetName: pet.vetName,
-                  vetPhone: value,
-                  vaccinations: pet.vaccinations,
-                ),
+                onChanged: (value) => setState(() {
+                  pet = Pet(
+                    id: pet.id,
+                    name: pet.name,
+                    type: pet.type,
+                    breed: pet.breed,
+                    birthDate: pet.birthDate,
+                    vetName: pet.vetName,
+                    vetPhone: value,
+                    vaccinations: pet.vaccinations,
+                  );
+                }),
               ),
             ],
           ),
@@ -795,13 +713,26 @@ class _PetDetailScreenState extends State<PetDetailScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child:
+                Text('Cancel', style: TextStyle(color: Colors.grey.shade700)),
           ),
           ElevatedButton(
-            onPressed: () {
-              widget.onUpdate(pet);
-              Navigator.pop(context);
+            onPressed: () async {
+              final updatedPet = await _petService.updatePet(pet);
+              if (updatedPet != null) {
+                setState(() {
+                  pet = updatedPet;
+                });
+                widget.onUpdate(pet);
+                Navigator.pop(context);
+              }
             },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).primaryColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
             child: const Text('Save'),
           ),
         ],
@@ -820,37 +751,97 @@ class _PetProfileHeader extends StatelessWidget {
     final age = _calculateAge(pet.birthDate);
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.only(top: 10, bottom: 30),
       decoration: BoxDecoration(
-        color: Colors.teal.shade50,
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(32),
-          bottomRight: Radius.circular(32),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Theme.of(context).primaryColor,
+            Theme.of(context).primaryColor.withOpacity(0.8),
+          ],
         ),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(40),
+          bottomRight: Radius.circular(40),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          _PetAvatar(type: pet.type),
+          Hero(
+            tag: 'pet-${pet.id}',
+            child: _PetAvatar(type: pet.type),
+          ),
           const SizedBox(height: 16),
-          Text(pet.name, style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 8),
-          Text('${pet.type} • $age old'),
-          const SizedBox(height: 16),
-          _buildInfoRow('Veterinarian', pet.vetName),
-          _buildInfoRow('Contact', pet.vetPhone),
+          Text(
+            pet.name,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${pet.breed} • $age old',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildInfoChip(
+                  context, 'Veterinarian', pet.vetName, Icons.medical_services),
+              const SizedBox(width: 16),
+              _buildInfoChip(context, 'Phone', pet.vetPhone, Icons.phone),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+  Widget _buildInfoChip(
+      BuildContext context, String label, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text('$label: ', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Text(value),
+          Icon(icon, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                ),
+              ),
+              Text(
+                value.isEmpty ? 'Not set' : value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -883,44 +874,111 @@ class _VaccineDialogState extends State<VaccineDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add Vaccination'),
+      title: Row(
+        children: [
+          Icon(Icons.vaccines, color: Theme.of(context).primaryColor),
+          const SizedBox(width: 10),
+          const Text('Add Vaccination'),
+        ],
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: _nameController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Vaccine Name',
-                icon: Icon(Icons.medical_services),
+                icon: const Icon(Icons.medical_services),
+                floatingLabelBehavior: FloatingLabelBehavior.always,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
               ),
             ),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: const Icon(Icons.calendar_today),
-              title: const Text('Due Date'),
-              subtitle: Text(DateFormat.yMMMd().format(_dueDate)),
+            const SizedBox(height: 20),
+            InkWell(
               onTap: () async {
                 final date = await showDatePicker(
                   context: context,
                   initialDate: _dueDate,
                   firstDate: DateTime.now(),
                   lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+                  builder: (context, child) {
+                    return Theme(
+                      data: Theme.of(context).copyWith(
+                        colorScheme: ColorScheme.light(
+                          primary: Theme.of(context).primaryColor,
+                        ),
+                      ),
+                      child: child!,
+                    );
+                  },
                 );
                 if (date != null) setState(() => _dueDate = date);
               },
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_today),
+                    const SizedBox(width: 16),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Due Date',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        Text(
+                          DateFormat.yMMMd().format(_dueDate),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 16),
-            SwitchListTile(
-              title: const Text('Recurring every 28 days'),
-              value: _isRecurring,
-              onChanged: (value) => setState(() => _isRecurring = value),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade300),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SwitchListTile(
+                title: const Text('Recurring (every 28 days)'),
+                value: _isRecurring,
+                onChanged: (value) => setState(() => _isRecurring = value),
+                contentPadding: EdgeInsets.zero,
+                activeColor: Theme.of(context).primaryColor,
+              ),
             ),
+            const SizedBox(height: 16),
             TextField(
               controller: _notesController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Notes',
-                icon: Icon(Icons.notes),
+                icon: const Icon(Icons.notes),
+                floatingLabelBehavior: FloatingLabelBehavior.always,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
               ),
               maxLines: 3,
             ),
@@ -930,10 +988,20 @@ class _VaccineDialogState extends State<VaccineDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: Text('Cancel', style: TextStyle(color: Colors.grey.shade700)),
         ),
         ElevatedButton(
           onPressed: () {
+            if (_nameController.text.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Please enter a vaccine name'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              return;
+            }
+
             final newVaccine = Vaccination(
               id: DateTime.now().millisecondsSinceEpoch.toString(),
               name: _nameController.text,
@@ -944,6 +1012,12 @@ class _VaccineDialogState extends State<VaccineDialog> {
             widget.onSave(newVaccine);
             Navigator.pop(context);
           },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Theme.of(context).primaryColor,
+            foregroundColor: Colors.white,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
           child: const Text('Save'),
         ),
       ],
@@ -964,119 +1038,175 @@ class _VaccineCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
+    final daysUntil = vaccine.dueDate.difference(DateTime.now()).inDays;
+    final bool isUrgent = !isPast && daysUntil <= 7;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: _getCardColor(context, isPast, isUrgent),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
       child: ListTile(
-        leading: Icon(
-          isPast ? Icons.check_circle : Icons.circle_notifications,
-          color: isPast ? Colors.green : Colors.amber,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: _getIconBgColor(context, isPast, isUrgent),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            _getIcon(isPast, isUrgent),
+            color: _getIconColor(isPast, isUrgent),
+            size: 28,
+          ),
         ),
-        title: Text(vaccine.name),
+        title: Text(
+          vaccine.name,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: isPast ? Colors.grey.shade700 : Colors.black87,
+          ),
+        ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(DateFormat.yMMMd().format(vaccine.dueDate)),
-            if (vaccine.notes.isNotEmpty)
-              Text(vaccine.notes,
-                  style: TextStyle(color: Colors.grey.shade600)),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  Icons.event,
+                  size: 14,
+                  color: isPast ? Colors.grey.shade500 : Colors.black54,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  DateFormat.yMMMd().format(vaccine.dueDate),
+                  style: TextStyle(
+                    color: isPast ? Colors.grey.shade500 : Colors.black54,
+                  ),
+                ),
+                if (!isPast && daysUntil >= 0) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _getChipColor(isUrgent),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      daysUntil == 0
+                          ? 'Today'
+                          : daysUntil == 1
+                              ? 'Tomorrow'
+                              : 'In $daysUntil days',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        color: _getChipTextColor(isUrgent),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            if (vaccine.notes.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(
+                    Icons.notes,
+                    size: 14,
+                    color: isPast ? Colors.grey.shade500 : Colors.black54,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      vaccine.notes,
+                      style: TextStyle(
+                        color: isPast ? Colors.grey.shade500 : Colors.black54,
+                        fontSize: 12,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (vaccine.isRecurring) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(
+                    Icons.repeat,
+                    size: 14,
+                    color: Colors.indigo.shade400,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Recurring (28 days)',
+                    style: TextStyle(
+                      color: Colors.indigo.shade400,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
         trailing: IconButton(
-          icon: const Icon(Icons.delete, color: Colors.redAccent),
+          icon: const Icon(Icons.delete_outline),
+          color: Colors.red.shade400,
           onPressed: onDelete,
+          tooltip: 'Delete vaccination',
         ),
       ),
     );
   }
-}
 
-// Pet and Vaccination classes remain same as previous implementation with added fields
-class Pet {
-  final String id;
-  final String name;
-  final String type;
-  final String breed;
-  final DateTime birthDate;
-  final String vetName;
-  final String vetPhone;
-  final List<Vaccination> vaccinations;
-
-  Pet({
-    required this.id,
-    required this.name,
-    required this.type,
-    required this.breed,
-    required this.birthDate,
-    required this.vetName,
-    required this.vetPhone,
-    required this.vaccinations,
-  });
-
-  factory Pet.fromJson(Map<String, dynamic> json) {
-    return Pet(
-      id: json['id'],
-      name: json['name'],
-      type: json['type'],
-      breed: json['breed'],
-      birthDate: DateTime.parse(json['birthDate']),
-      vetName: json['vetName'],
-      vetPhone: json['vetPhone'],
-      vaccinations: (json['vaccinations'] as List)
-          .map((v) => Vaccination.fromJson(v))
-          .toList(),
-    );
+  Color _getCardColor(BuildContext context, bool isPast, bool isUrgent) {
+    if (isPast) return Colors.grey.shade100;
+    if (isUrgent) return Colors.red.shade50;
+    return Colors.white;
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'type': type,
-      'breed': breed,
-      'birthDate': birthDate.toIso8601String(),
-      'vetName': vetName,
-      'vetPhone': vetPhone,
-      'vaccinations': vaccinations.map((v) => v.toJson()).toList(),
-    };
-  }
-}
-
-class Vaccination {
-  final String id;
-  final String name;
-  final DateTime dueDate;
-  final String notes;
-  final bool isRecurring;
-  bool reminderSent;
-
-  Vaccination({
-    required this.id,
-    required this.name,
-    required this.dueDate,
-    this.notes = '',
-    this.isRecurring = false,
-    this.reminderSent = false,
-  });
-
-  factory Vaccination.fromJson(Map<String, dynamic> json) {
-    return Vaccination(
-      id: json['id'],
-      name: json['name'],
-      dueDate: DateTime.parse(json['dueDate']),
-      notes: json['notes'] ?? '',
-      isRecurring: json['isRecurring'] ?? false,
-      reminderSent: json['reminderSent'] ?? false,
-    );
+  Color _getIconBgColor(BuildContext context, bool isPast, bool isUrgent) {
+    if (isPast) return Colors.grey.shade200;
+    if (isUrgent) return Colors.red.shade100;
+    return Colors.blue.shade50;
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'name': name,
-      'dueDate': dueDate.toIso8601String(),
-      'notes': notes,
-      'isRecurring': isRecurring,
-      'reminderSent': reminderSent,
-    };
+  IconData _getIcon(bool isPast, bool isUrgent) {
+    if (isPast) return Icons.check_circle_outline;
+    if (isUrgent) return Icons.notification_important;
+    return Icons.event_available;
+  }
+
+  Color _getIconColor(bool isPast, bool isUrgent) {
+    if (isPast) return Colors.green.shade600;
+    if (isUrgent) return Colors.red.shade600;
+    return Colors.blue.shade600;
+  }
+
+  Color _getChipColor(bool isUrgent) {
+    if (isUrgent) return Colors.red.shade100;
+    return Colors.blue.shade100;
+  }
+
+  Color _getChipTextColor(bool isUrgent) {
+    if (isUrgent) return Colors.red.shade800;
+    return Colors.blue.shade800;
   }
 }

@@ -223,7 +223,7 @@ class _RegisterPageState extends State<RegisterPage> {
           SizedBox(height: 10),
           _textAnimation
               ? Text(
-                  "Sow&Grow",
+                  "SOW&GROW",
                   style: TextStyle(
                     fontSize: 36,
                     fontWeight: FontWeight.bold,
@@ -255,7 +255,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   child: AnimatedTextKit(
                     animatedTexts: [
                       TyperAnimatedText(
-                        "Sow&Grow",
+                        "SOW&GROW",
                         speed: Duration(milliseconds: 200),
                       ),
                     ],
