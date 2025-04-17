@@ -41,19 +41,19 @@ class _BottomNavBarState extends State<BottomNavBar> {
           _buildNavItem(
             context: context,
             icon: Icons.article,
-            label: _getTranslation('blog', currentLanguage),
+            label: _getTranslation('AgriTalks', currentLanguage),
             index: 0,
           ),
           _buildNavItem(
             context: context,
             icon: Icons.chat_bubble_outline,
-            label: _getTranslation('chatbot', currentLanguage),
+            label: _getTranslation('FarmHelper', currentLanguage),
             index: 1,
           ),
           _buildNavItem(
             context: context,
-            icon: Icons.person,
-            label: _getTranslation('Vet', currentLanguage),
+            icon: Icons.vaccines,
+            label: _getTranslation('Livestocare', currentLanguage),
             index: 2,
           ),
         ],

@@ -5,31 +5,31 @@ class HelpPage extends StatelessWidget {
   // Team member data structure
   final List<Map<String, String>> teamMembers = [
     {
-      'name': 'Sarah Johnson',
-      'role': 'Community Manager',
-      'phone': '+1 (555) 123-4567',
-      'email': 'sarah.johnson@farmapp.com',
-      'image': 'assets/images/sarah.jpg',
-    },
-    {
-      'name': 'Miguel Hernandez',
-      'role': 'Technical Support',
-      'phone': '+1 (555) 234-5678',
-      'email': 'miguel.hernandez@farmapp.com',
-      'image': 'assets/images/miguel.jpg',
-    },
-    {
-      'name': 'Aisha Patel',
-      'role': 'Agricultural Specialist',
-      'phone': '+1 (555) 345-6789',
-      'email': 'aisha.patel@farmapp.com',
+      'name': 'Lingesh V',
+      'role': 'Agricultural Specialist/App Developer',
+      'phone': '+91 1234567890',
+      'email': 'Lingesh.V@farmapp.com',
       'image': 'assets/images/aisha.jpg',
     },
     {
-      'name': 'Robert Chen',
-      'role': 'App Developer',
-      'phone': '+1 (555) 456-7890',
-      'email': 'robert.chen@farmapp.com',
+      'name': 'Saravanan K',
+      'role': 'Technical Support/App Developer',
+      'phone': '+91 12345098765',
+      'email': 'Saravanan.k@farmapp.com',
+      'image': 'assets/images/sarah.jpg',
+    },
+    {
+      'name': 'Akash',
+      'role': 'Technical Support/App Developer',
+      'phone': '+91 0987654321',
+      'email': 'Akash@farmapp.com',
+      'image': 'assets/images/miguel.jpg',
+    },
+    {
+      'name': 'Mahaveer K',
+      'role': 'Technical Support/App Developer',
+      'phone': '+91 9876501234',
+      'email': 'Mahaveer.K@farmapp.com',
       'image': 'assets/images/robert.jpg',
     },
   ];

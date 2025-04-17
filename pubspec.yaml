@@ -129,7 +129,7 @@ flutter:
     - images/Ecommerce/rent.png
     - images/Ecommerce/seeds.png
     - images/Ecommerce/Tools.png
-    - images/pet.png
+    - images/cattle.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

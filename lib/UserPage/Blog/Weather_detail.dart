@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:weather/weather.dart';
-
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geocoding/geocoding.dart';
+import '../Map_diseise/map_service.dart';
+import '../Map_diseise/map_model.dart';
 import 'const.dart';
 
 class WeatherDetail extends StatefulWidget {
@@ -13,24 +16,89 @@ class WeatherDetail extends StatefulWidget {
 
 class _WeatherDetailState extends State<WeatherDetail> {
   final WeatherFactory _weatherFactory = WeatherFactory(OPEN_WEATHER_API_KEY);
+  final DiseasePointService _diseaseService = DiseasePointService();
   Weather? _weather;
   bool _isLoading = false;
-  final String _staticLocation = "Pollachi";
+  bool _isLoadingDiseases = false;
+  String _userLocation = "";
+  List<DiseasePoint> _nearbyDiseases = [];
+  double? _latitude;
+  double? _longitude;
 
   @override
   void initState() {
     super.initState();
-    _fetchWeatherForPollachi();
+    _loadUserLocation();
   }
 
-  Future<void> _fetchWeatherForPollachi() async {
+  Future<void> _loadUserLocation() async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      final prefs = await SharedPreferences.getInstance();
+      final location = prefs.getString('location') ?? "Angalakurichi";
+
+      // First try to get coordinates from prefs
+      double? lat = prefs.getDouble('latitude');
+      double? lon = prefs.getDouble('longitude');
+
+      // If not found in prefs, use geocoding to get coordinates for Angalakurichi
+      if (lat == null || lon == null) {
+        try {
+          List<Location> locations =
+              await locationFromAddress("Angalakurichi, Tamil Nadu, India");
+          if (locations.isNotEmpty) {
+            lat = locations.first.latitude;
+            lon = locations.first.longitude;
+
+            // Save the coordinates for future use
+            await prefs.setDouble('latitude', lat);
+            await prefs.setDouble('longitude', lon);
+          }
+        } catch (e) {
+          print('Geocoding error: $e');
+          // Fallback to known coordinates for Angalakurichi
+          lat = 10.5677;
+          lon = 77.0921;
+        }
+      }
+
+      setState(() {
+        _userLocation = location;
+        _latitude = lat;
+        _longitude = lon;
+      });
+
+      print(
+          'Location set to: $_userLocation ($_latitude, $_longitude)'); // Debug log
+
+      // Fetch both weather and diseases
+      await _fetchWeather();
+      if (_latitude != null && _longitude != null) {
+        await _fetchNearbyDiseases();
+      }
+    } catch (e) {
+      print('Error loading user location: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading location: $e')),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _fetchWeather() async {
     setState(() {
       _isLoading = true;
     });
 
     try {
       Weather weather =
-          await _weatherFactory.currentWeatherByCityName(_staticLocation);
+          await _weatherFactory.currentWeatherByCityName(_userLocation);
       setState(() {
         _weather = weather;
         _isLoading = false;
@@ -42,8 +110,47 @@ class _WeatherDetailState extends State<WeatherDetail> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
             content: Text(
-                "Could not fetch weather for $_staticLocation. Please try again later.")),
+                "Could not fetch weather for $_userLocation. Please try again later.")),
       );
+    }
+  }
+
+  Future<void> _fetchNearbyDiseases() async {
+    if (_latitude == null || _longitude == null) return;
+
+    setState(() {
+      _isLoadingDiseases = true;
+    });
+
+    try {
+      print('Fetching diseases near: $_latitude, $_longitude'); // Debug log
+      final diseases = await _diseaseService.getNearbyDiseasePoints(
+        latitude: _latitude!,
+        longitude: _longitude!,
+        radiusKm: 100,
+      );
+
+      print('Found ${diseases.length} nearby diseases'); // Debug log
+
+      if (mounted) {
+        setState(() {
+          _nearbyDiseases = diseases;
+          _isLoadingDiseases = false;
+        });
+      }
+    } catch (e) {
+      print('Error fetching nearby diseases: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingDiseases = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to fetch nearby disease reports: $e'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -68,12 +175,22 @@ class _WeatherDetailState extends State<WeatherDetail> {
             children: [
               _buildAppBar(),
               Expanded(
-                child: _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: Colors.white))
-                    : (_weather == null
-                        ? _buildErrorState()
-                        : _buildWeatherDetails()),
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      if (_isLoading)
+                        const Center(
+                            child:
+                                CircularProgressIndicator(color: Colors.white))
+                      else if (_weather == null)
+                        _buildErrorState()
+                      else
+                        _buildWeatherDetails(),
+                      const SizedBox(height: 20),
+                      _buildNearbyDiseases(),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -103,7 +220,7 @@ class _WeatherDetailState extends State<WeatherDetail> {
             ),
           ),
           IconButton(
-            onPressed: _fetchWeatherForPollachi,
+            onPressed: _fetchWeather,
             icon: const Icon(Icons.refresh, color: Colors.white),
             tooltip: "Refresh weather data",
           ),
@@ -124,7 +241,7 @@ class _WeatherDetailState extends State<WeatherDetail> {
           ),
           const SizedBox(height: 20),
           Text(
-            "Could not load weather for $_staticLocation",
+            "Could not load weather for $_userLocation",
             style: TextStyle(
                 color: Colors.white.withOpacity(0.9),
                 fontSize: 18,
@@ -132,7 +249,7 @@ class _WeatherDetailState extends State<WeatherDetail> {
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
-            onPressed: _fetchWeatherForPollachi,
+            onPressed: _fetchWeather,
             icon: const Icon(Icons.refresh),
             label: const Text("Try Again"),
             style: ElevatedButton.styleFrom(
@@ -168,7 +285,7 @@ class _WeatherDetailState extends State<WeatherDetail> {
     return Column(
       children: [
         Text(
-          _staticLocation.toUpperCase(),
+          _userLocation.toUpperCase(),
           style: const TextStyle(
             color: Colors.white,
             fontSize: 32,
@@ -384,5 +501,123 @@ class _WeatherDetailState extends State<WeatherDetail> {
         ],
       ),
     );
+  }
+
+  Widget _buildNearbyDiseases() {
+    if (_isLoadingDiseases) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20.0),
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
+    if (_nearbyDiseases.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Center(
+          child: Text(
+            "No disease reports found in your area",
+            style: TextStyle(color: Colors.white, fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Nearby Disease Reports (100km radius)",
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _nearbyDiseases.length,
+            itemBuilder: (context, index) {
+              final disease = _nearbyDiseases[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                color: Colors.white.withOpacity(0.2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ListTile(
+                  leading: Icon(
+                    disease.isPlantDisease ? Icons.local_florist : Icons.pets,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  title: Text(
+                    disease.diseaseName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        disease.isPlantDisease
+                            ? "Crop: ${disease.cropType}"
+                            : "Animal Disease",
+                        style: TextStyle(color: Colors.white.withOpacity(0.9)),
+                      ),
+                      Text(
+                        "Location: ${disease.placeName}",
+                        style: TextStyle(color: Colors.white.withOpacity(0.9)),
+                      ),
+                      Text(
+                        "Cases: ${disease.caseCount}",
+                        style: TextStyle(color: Colors.white.withOpacity(0.9)),
+                      ),
+                    ],
+                  ),
+                  trailing: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _getIntensityColor(disease.intensity),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      "${(disease.intensity * 100).toInt()}%",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getIntensityColor(double intensity) {
+    if (intensity < 0.3) {
+      return Colors.green;
+    } else if (intensity < 0.7) {
+      return Colors.orange;
+    } else {
+      return Colors.red;
+    }
   }
 }

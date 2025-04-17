@@ -32,7 +32,7 @@ class _AddPetScreenState extends State<AddPetScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add New Pet'),
+        title: const Text('Add New Cattle'),
         elevation: 0,
         centerTitle: true,
       ),
@@ -68,13 +68,13 @@ class _AddPetScreenState extends State<AddPetScreen> {
                 ),
                 const SizedBox(height: 30),
                 Text(
-                  'Pet Information',
+                  'Cattle Information',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                 ),
                 const SizedBox(height: 16),
-                _buildTextField(_nameController, 'Pet Name', Icons.pets),
+                _buildTextField(_nameController, 'Cattle Name', Icons.pets),
                 const SizedBox(height: 20),
                 _buildTypeDropdown(),
                 const SizedBox(height: 20),
@@ -105,7 +105,7 @@ class _AddPetScreenState extends State<AddPetScreen> {
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.save),
                     label: const Text(
-                      'SAVE PET PROFILE',
+                      'SAVE Cattle PROFILE',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -168,7 +168,7 @@ class _AddPetScreenState extends State<AddPetScreen> {
     return DropdownButtonFormField<String>(
       value: _petType,
       decoration: InputDecoration(
-        labelText: 'Pet Type',
+        labelText: 'Cattle Type',
         prefixIcon: Icon(
           _getIconForPetType(_petType),
           color: Theme.of(context).primaryColor,

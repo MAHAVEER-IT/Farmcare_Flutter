@@ -17,7 +17,7 @@ class PetVaccinationApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Pet Care Companion',
+      title: 'Livestocare',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.teal,
@@ -146,7 +146,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pet Care Companion'),
+        title: const Text('Livestocare'),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications),
@@ -174,7 +174,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         child: FloatingActionButton.extended(
           onPressed: _addNewPet,
           icon: const Icon(Icons.pets),
-          label: const Text('Add Pet'),
+          label: const Text('Add Cattle'),
         ),
       ),
     );
@@ -185,10 +185,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.asset('images/pet.png', width: 200),
+          Image.asset('images/cattle.png', width: 200),
           const SizedBox(height: 20),
           Text(
-            'No Pets Added Yet',
+            'No Cattles Added Yet',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 10),

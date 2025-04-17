@@ -4,30 +4,8 @@ import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
-// Disease Point class definition
-class DiseasePoint {
-  final LatLng location;
-  final String diseaseName;
-  final String cropType;
-  final double intensity;
-  final int caseCount;
-  final String placeName;
-  final bool isPlantDisease;
-  final DateTime reportDate;
-  final String notes;
-
-  DiseasePoint({
-    required this.location,
-    required this.diseaseName,
-    required this.cropType,
-    required this.intensity,
-    required this.caseCount,
-    required this.placeName,
-    required this.isPlantDisease,
-    required this.reportDate,
-    this.notes = '',
-  });
-}
+import 'map_model.dart';
+import 'map_service.dart';
 
 class HeatmapPageMap extends StatefulWidget {
   const HeatmapPageMap({Key? key}) : super(key: key);
@@ -37,6 +15,7 @@ class HeatmapPageMap extends StatefulWidget {
 }
 
 class _HeatmapPageStateMap extends State<HeatmapPageMap> {
+  final DiseasePointService _service = DiseasePointService();
   MapController _mapController = MapController();
 
   // Place name state variable
@@ -44,109 +23,38 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
   LatLng? _currentLocation;
   List<DiseasePoint> _diseasePoints = [];
 
-  // Updated disease data points to include disease type (plant/animal)
-  final List<DiseasePoint> _diseasePointsStatic = [
-    DiseasePoint(
-      location: LatLng(37.7749, -122.4194),
-      diseaseName: "Leaf Spot",
-      cropType: "Tomato",
-      intensity: 0.8,
-      caseCount: 12,
-      placeName: "San Francisco, CA",
-      isPlantDisease: true,
-      reportDate: DateTime.now(),
-    ),
-    DiseasePoint(
-      location: LatLng(37.7850, -122.4100),
-      diseaseName: "Foot and Mouth",
-      cropType: "Cattle",
-      intensity: 0.5,
-      caseCount: 7,
-      placeName: "Fisherman's Wharf, SF",
-      isPlantDisease: false,
-      reportDate: DateTime.now(),
-    ),
-    DiseasePoint(
-      location: LatLng(37.7800, -122.4300),
-      diseaseName: "Early Blight",
-      cropType: "Potato",
-      intensity: 0.9,
-      caseCount: 15,
-      placeName: "Golden Gate Park, SF",
-      isPlantDisease: true,
-      reportDate: DateTime.now(),
-    ),
-    DiseasePoint(
-      location: LatLng(37.7700, -122.4250),
-      diseaseName: "Avian Flu",
-      cropType: "Poultry",
-      intensity: 0.4,
-      caseCount: 55,
-      placeName: "Mission District, SF",
-      isPlantDisease: false,
-      reportDate: DateTime.now(),
-    ),
-  ];
-
   // Simplified filter options
   bool _showPlantDiseases =
       true; // true for plant diseases, false for animal diseases
   DateTime _selectedDate = DateTime.now();
   bool _isLoading = true;
 
-  // Disease types for filter
-  final List<String> _diseaseTypes = [
-    'All Diseases',
-    'Leaf Spot',
-    'Early Blight',
-    'Foot Rot',
-    'Rust',
-    'Powdery Mildew'
-  ];
-
-  // Crop types for filter
-  final List<String> _cropTypes = [
-    'All Crops',
-    'Tomato',
-    'Potato',
-    'Rice',
-    'Wheat',
-    'Cotton'
-  ];
-
-  // Timeframe options
-  final List<String> _timeframes = [
-    'Today',
-    'Last 7 Days',
-    'Last 30 Days',
-    'This Season'
-  ];
-
-  // Add state variables for tracking card position
   late Size _screenSize;
-  late Offset _cardPosition;
-  bool _isDragging = false;
+  Offset? _cardPosition;
 
   @override
   void initState() {
     super.initState();
-    _getCurrentLocation();
-    // Load static disease points for demo
-    _diseasePoints = List.from(_diseasePointsStatic);
-    // Initialize card position after frame is built
+    _mapController = MapController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _screenSize = MediaQuery.of(context).size;
-      setState(() {
-        _cardPosition =
-            Offset(_screenSize.width - 200, _screenSize.height - 150);
-      });
+      _getCurrentLocation();
+      _initializeCardPosition();
+    });
+  }
+
+  void _initializeCardPosition() {
+    _screenSize = MediaQuery.of(context).size;
+    setState(() {
+      _cardPosition = Offset(
+        _screenSize.width - 200, // Position from right
+        _screenSize.height - 200, // Position from bottom
+      );
     });
   }
 
   Future<void> _getCurrentLocation() async {
     setState(() => _isLoading = true);
     try {
-      // Check location permissions
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -175,21 +83,56 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
         _isLoading = false;
       });
 
-      // Move map to current location
-      _mapController.move(_currentLocation!, 13.0);
+      // Move map to current location after state is updated
+      if (_currentLocation != null) {
+        // Add a small delay to ensure the map is ready
+        await Future.delayed(const Duration(milliseconds: 100));
+        _mapController.move(_currentLocation!, 13.0);
+        _fetchDiseasePoints();
+      }
     } catch (e) {
       print('Error getting location: $e');
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error getting location: $e')),
+        );
+      }
     }
   }
 
-  void _addDiseasePoint(DiseasePoint point) {
-    setState(() {
-      _diseasePoints.add(point);
-    });
+  Future<void> _fetchDiseasePoints() async {
+    if (_currentLocation == null) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      print(
+          'Fetching disease points for: ${_showPlantDiseases ? 'Plants' : 'Animals'}'); // Debug log
+      final points = await _service.getNearbyDiseasePoints(
+        latitude: _currentLocation!.latitude,
+        longitude: _currentLocation!.longitude,
+        radiusKm: 10.0,
+        isPlantDisease: _showPlantDiseases,
+      );
+
+      print('Fetched ${points.length} points'); // Debug log
+
+      if (mounted) {
+        setState(() {
+          _diseasePoints = points;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error fetching disease points: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error fetching disease points: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -328,7 +271,7 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
                                                     ? Icons.local_florist
                                                     : Icons.pets,
                                                 color: Colors.white,
-                                                size: 24.0,
+                                                size: 20.0,
                                               ),
                                             ),
                                             Container(
@@ -357,148 +300,24 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
                           ),
                         ],
                       ),
-                      Positioned(
-                        left: _cardPosition.dx,
-                        top: _cardPosition.dy,
-                        child: Draggable(
-                          feedback: Material(
-                            color: Colors.transparent,
-                            child: Card(
-                              elevation: 8,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Opacity(
-                                opacity: 0.9,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(8.0),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            'Disease Status',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold),
-                                          ),
-                                          Icon(Icons.drag_indicator,
-                                              size: 16, color: Colors.grey),
-                                        ],
-                                      ),
-                                      SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Container(
-                                            width: 12,
-                                            height: 12,
-                                            decoration: BoxDecoration(
-                                              color: Colors.red,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                          SizedBox(width: 4),
-                                          Text('Red Zone (50+ cases)'),
-                                        ],
-                                      ),
-                                      SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Container(
-                                            width: 12,
-                                            height: 12,
-                                            decoration: BoxDecoration(
-                                              color: Colors.amber,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                          SizedBox(width: 4),
-                                          Text('Yellow Zone (<50 cases)'),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          childWhenDragging: SizedBox(),
-                          onDragStarted: () {
-                            setState(() {
-                              _isDragging = true;
-                            });
-                          },
-                          onDragEnd: (details) {
-                            setState(() {
-                              _isDragging = false;
-                              _cardPosition =
-                                  _getBoundedPosition(details.offset);
-                            });
-                          },
-                          child: Card(
-                            elevation: _isDragging ? 8 : 4,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        'Disease Status',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold),
-                                      ),
-                                      Icon(Icons.drag_indicator,
-                                          size: 16, color: Colors.grey),
-                                    ],
-                                  ),
-                                  SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 12,
-                                        height: 12,
-                                        decoration: BoxDecoration(
-                                          color: Colors.red,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Text('Red Zone (50+ cases)'),
-                                    ],
-                                  ),
-                                  SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 12,
-                                        height: 12,
-                                        decoration: BoxDecoration(
-                                          color: Colors.amber,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      SizedBox(width: 4),
-                                      Text('Yellow Zone (<50 cases)'),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
+                      if (_cardPosition !=
+                          null) // Only show when position is set
+                        Positioned(
+                          left: _cardPosition!.dx,
+                          top: _cardPosition!.dy,
+                          child: Draggable(
+                            feedback: _buildDraggableCard(isBeingDragged: true),
+                            childWhenDragging:
+                                Container(), // Empty container when dragging
+                            child: _buildDraggableCard(isBeingDragged: false),
+                            onDragEnd: (details) {
+                              setState(() {
+                                _cardPosition =
+                                    _getBoundedPosition(details.offset);
+                              });
+                            },
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -556,9 +375,8 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
       // Use the case count to determine zone color (red or yellow)
       Color circleColor = _getZoneColor(point.caseCount);
 
-      // Scale radius based on case count
-      double radius = 100 + (point.caseCount * 5);
-      if (radius > 400) radius = 400;
+      // Fixed radius based on zone type
+      double radius = point.caseCount >= 50 ? 100.0 : 70.0;
 
       return CircleMarker(
         point: point.location,
@@ -618,6 +436,8 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
                     setState(() {
                       _showPlantDiseases = newSelection.first;
                     });
+                    // Fetch new disease points when filter changes
+                    _fetchDiseasePoints();
                   },
                   style: ButtonStyle(
                     backgroundColor: MaterialStateProperty.resolveWith<Color>(
@@ -664,6 +484,8 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
                       setState(() {
                         _selectedDate = picked;
                       });
+                      // Fetch new disease points when date changes
+                      _fetchDiseasePoints();
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -679,6 +501,79 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
         ],
       ),
     );
+  }
+
+  Widget _buildDraggableCard({required bool isBeingDragged}) {
+    return Card(
+      elevation: isBeingDragged ? 8 : 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Container(
+        width: 180, // Fixed width
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Disease Status',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Icon(Icons.drag_indicator, size: 16, color: Colors.grey),
+              ],
+            ),
+            SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                SizedBox(width: 4),
+                Text('Red Zone (50+ cases)'),
+              ],
+            ),
+            SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Colors.amber,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                SizedBox(width: 4),
+                Text('Yellow Zone (<50 cases)'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Offset _getBoundedPosition(Offset position) {
+    const cardWidth = 180.0;
+    const cardHeight = 100.0;
+
+    double dx = position.dx;
+    double dy = position.dy;
+
+    // Bound the position within the screen
+    dx = dx.clamp(0, _screenSize.width - cardWidth);
+    dy = dy.clamp(0, _screenSize.height - cardHeight);
+
+    return Offset(dx, dy);
   }
 
   void _showUploadDialog(BuildContext context) {
@@ -804,7 +699,7 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green[700],
               ),
-              onPressed: () {
+              onPressed: () async {
                 if (diseaseName.isEmpty ||
                     cropOrAnimalType.isEmpty ||
                     selectedLocation == null) {
@@ -815,37 +710,42 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
                   return;
                 }
 
-                // Calculate intensity based on case count
-                double intensity = caseCount >= 50 ? 0.9 : caseCount / 60.0;
-                if (intensity > 1.0) intensity = 1.0;
+                try {
+                  final newPoint = await _service.createDiseasePoint(
+                    latitude: selectedLocation!.latitude,
+                    longitude: selectedLocation!.longitude,
+                    diseaseName: diseaseName,
+                    cropType: cropOrAnimalType,
+                    intensity: caseCount >= 50 ? 0.9 : caseCount / 60.0,
+                    caseCount: caseCount,
+                    placeName: _currentPlaceName,
+                    isPlantDisease: _showPlantDiseases,
+                    notes: notes,
+                  );
 
-                final newPoint = DiseasePoint(
-                  location: selectedLocation!,
-                  diseaseName: diseaseName,
-                  cropType: cropOrAnimalType,
-                  intensity: intensity,
-                  caseCount: caseCount,
-                  placeName: _currentPlaceName,
-                  isPlantDisease: _showPlantDiseases,
-                  notes: notes,
-                  reportDate: _selectedDate,
-                );
+                  setState(() {
+                    _diseasePoints.add(newPoint);
+                  });
 
-                _addDiseasePoint(newPoint);
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Row(
-                      children: [
-                        Icon(Icons.check_circle, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text('Disease report submitted successfully'),
-                      ],
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.white),
+                          SizedBox(width: 8),
+                          Text('Disease report submitted successfully'),
+                        ],
+                      ),
+                      backgroundColor:
+                          caseCount >= 50 ? Colors.red : Colors.amber,
                     ),
-                    backgroundColor:
-                        caseCount >= 50 ? Colors.red : Colors.amber,
-                  ),
-                );
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error creating disease point: $e')),
+                  );
+                }
               },
             ),
           ],
@@ -859,7 +759,6 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
 
   // Enhanced disease point details with improved UI
   void _showPointDetails(BuildContext context, DiseasePoint point) {
-    // Determine if this is a red or yellow zone
     final bool isRedZone = point.caseCount >= 50;
 
     showDialog(
@@ -1006,6 +905,8 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
             icon: Icon(Icons.share),
             label: Text('Share'),
             onPressed: () {
+              // Simplified share logic without the ID check since it's not available
+              // TODO: Implement sharing logic with the point data directly
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Sharing disease information...')),
@@ -1113,21 +1014,5 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
         ),
       ),
     );
-  }
-
-  // Add method to keep card within bounds
-  Offset _getBoundedPosition(Offset position) {
-    final cardWidth = 200.0; // Approximate card width
-    final cardHeight = 120.0; // Approximate card height
-
-    double dx = position.dx;
-    double dy = position.dy;
-
-    // Constrain x position
-    dx = dx.clamp(0, _screenSize.width - cardWidth);
-    // Constrain y position
-    dy = dy.clamp(0, _screenSize.height - cardHeight);
-
-    return Offset(dx, dy);
   }
 }

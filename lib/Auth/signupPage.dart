@@ -357,7 +357,7 @@ class _RegisterPageState extends State<RegisterPage> {
             // Location field
             _buildTextField(
               controller: _location,
-              label: 'Location',
+              label: 'City/Village',
               icon: Icons.location_on_outlined,
               keyboardType: TextInputType.streetAddress,
             ),

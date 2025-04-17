@@ -118,6 +118,7 @@ class AuthService {
             data['name'] ?? '',
             data['email'] ?? '',
             data['userType'] ?? 'user',
+            data['location'] ?? 'Coimbatore', // Add location with default value
           );
 
           print('Login successful - Token received and saved');
@@ -127,6 +128,8 @@ class AuthService {
             'message': 'Login successful',
             'token': data['token'],
             'userId': data['userId'],
+            'location':
+                data['location'] ?? 'Coimbatore', // Add location to return
           };
         } else {
           print('Login failed - No token in response');
@@ -187,7 +190,8 @@ class DatabaseService {
     String token,
     String name,
     String email,
-    String userType, // Add userType parameter
+    String userType,
+    String location, // Add location parameter
   ) async {
     try {
       final storage = await prefs.SharedPreferences.getInstance();
@@ -196,7 +200,8 @@ class DatabaseService {
       await storage.setString('token', token);
       await storage.setString('name', name);
       await storage.setString('email', email);
-      await storage.setString('userType', userType); // Save userType
+      await storage.setString('userType', userType);
+      await storage.setString('location', location); // Save location
       print('User data saved in local storage');
     } catch (e) {
       print('Error saving user data: $e');

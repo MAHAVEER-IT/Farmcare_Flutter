@@ -139,7 +139,7 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
       if (response['success'] == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Blog post created successfully'),
+            content: Text('post created successfully'),
             backgroundColor: Colors.green,
           ),
         );
@@ -171,7 +171,7 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          "Create Blog",
+          "Share AgriTalk",
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -227,7 +227,7 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        "Share Your Story",
+                        "Share Your knowledge",
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.8),
                           fontSize: 16,
@@ -381,7 +381,7 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                                           ),
                                           SizedBox(height: 6),
                                           Text(
-                                            'Make your story stand out',
+                                            'Make your knowledge stand out',
                                             style: TextStyle(
                                               color: Colors.black54,
                                               fontSize: 14,
@@ -449,7 +449,7 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                               color: Colors.blueGrey[800],
                             ),
                             decoration: InputDecoration(
-                              hintText: 'Title Your Story',
+                              hintText: 'Title Your AgriTalk',
                               hintStyle: TextStyle(
                                 color: Colors.blueGrey[300],
                                 fontWeight: FontWeight.w500,
@@ -495,7 +495,7 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                                   ),
                                   SizedBox(width: 10),
                                   Text(
-                                    'Write Your Story',
+                                    'Write Your AgriTalk',
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
@@ -644,14 +644,14 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                       ElevatedButton(
                         onPressed: _isLoading ? null : _handleSubmit,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Color(0xFF6A11CB),
+                          backgroundColor: Colors.teal,
                           foregroundColor: Colors.white,
                           padding: EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
                           ),
                           elevation: 4,
-                          shadowColor: Color(0xFF6A11CB).withOpacity(0.4),
+                          shadowColor: Colors.teal.shade300,
                           disabledBackgroundColor: Colors.grey.shade400,
                         ),
                         child: Row(
@@ -668,9 +668,7 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                                 ),
                               ),
                             Text(
-                              _isLoading
-                                  ? 'Publishing...'
-                                  : 'Publish Blog Post',
+                              _isLoading ? 'Publishing...' : 'Share AgriTalk',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -680,7 +678,10 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                             if (!_isLoading)
                               Container(
                                 margin: EdgeInsets.only(left: 8),
-                                child: Icon(Icons.send_rounded),
+                                child: Icon(
+                                  Icons.send_rounded,
+                                  color: Colors.black,
+                                ),
                               ),
                           ],
                         ),
@@ -716,13 +717,13 @@ class _CreateBlogPageState extends State<CreateBlogPage> {
                             width: 50,
                             height: 50,
                             child: CircularProgressIndicator(
-                              color: Color(0xFF6A11CB),
+                              color: Colors.teal,
                               strokeWidth: 5,
                             ),
                           ),
                           SizedBox(height: 16),
                           Text(
-                            'Publishing your blog...',
+                            'Sharing your AgriTalk...',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,

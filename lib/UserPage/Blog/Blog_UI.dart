@@ -213,25 +213,55 @@ class _BlogState extends State<Blog> {
     }
 
     try {
-      // Make API call to MyMemory translation service
-      final url = Uri.parse(
-          'https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(text)}&langpair=en|$targetLang');
+      // Split text into chunks of approximately 500 characters at sentence boundaries
+      List<String> chunks = [];
+      String currentChunk = '';
 
-      final response = await http.get(url);
+      // Split by sentences (looking for . ! ? followed by space)
+      List<String> sentences = text.split(RegExp(r'(?<=[.!?])\s+'));
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-
-        if (data['responseStatus'] == 200 && data['responseData'] != null) {
-          return data['responseData']['translatedText'];
+      for (String sentence in sentences) {
+        if ((currentChunk + sentence).length > 500) {
+          chunks.add(currentChunk);
+          currentChunk = sentence;
+        } else {
+          currentChunk += (currentChunk.isEmpty ? '' : ' ') + sentence;
         }
       }
+      if (currentChunk.isNotEmpty) {
+        chunks.add(currentChunk);
+      }
 
-      // Return original text if translation fails
-      return text;
+      // Translate each chunk
+      List<String> translatedChunks = [];
+      for (String chunk in chunks) {
+        // Make API call to MyMemory translation service
+        final url = Uri.parse(
+            'https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(chunk)}&langpair=en|$targetLang');
+
+        final response = await http.get(url);
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+
+          if (data['responseStatus'] == 200 && data['responseData'] != null) {
+            translatedChunks.add(data['responseData']['translatedText']);
+          } else {
+            translatedChunks.add(chunk); // Keep original if translation fails
+          }
+        } else {
+          translatedChunks.add(chunk); // Keep original if request fails
+        }
+
+        // Add a small delay between requests to avoid rate limiting
+        await Future.delayed(Duration(milliseconds: 300));
+      }
+
+      // Combine translated chunks
+      return translatedChunks.join(' ');
     } catch (e) {
       print('Translation error: $e');
-      return text;
+      return text; // Return original text if translation fails
     }
   }
 
@@ -252,11 +282,10 @@ class _BlogState extends State<Blog> {
     });
 
     try {
-      // Create a copy of blog posts for translation
-      List<BlogPost> translatedPosts = List.from(_blogPosts);
-
       // Translate each post
-      for (var post in translatedPosts) {
+      for (int i = 0; i < _blogPosts.length; i++) {
+        BlogPost post = _blogPosts[i];
+
         // Translate title
         String translatedTitle =
             await _translateText(post.originalTitle, langCode);
@@ -265,20 +294,23 @@ class _BlogState extends State<Blog> {
         String translatedContent =
             await _translateText(post.originalContent, langCode);
 
-        // Update post if translation was successful
+        // Update post with translated content
         if (mounted) {
           setState(() {
-            post.title = translatedTitle;
-            post.content = translatedContent;
+            _blogPosts[i].title = translatedTitle;
+            _blogPosts[i].content = translatedContent;
           });
         }
       }
     } catch (e) {
       print('Error during translation: $e');
       // Show error message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Translation failed. Please try again later.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Translation failed. Please try again later.')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -377,7 +409,7 @@ class _BlogState extends State<Blog> {
       return Scaffold(
         appBar: AppBar(
           backgroundColor: Colors.green.shade800,
-          title: Text(AppLocalizations.translate('blog', currentLanguage)),
+          title: Text(AppLocalizations.translate('AgriTalks', currentLanguage)),
         ),
         body: Center(
           child: Column(
@@ -412,7 +444,7 @@ class _BlogState extends State<Blog> {
             Expanded(
               child: Center(
                 child: Text(
-                  AppLocalizations.translate('blog', currentLanguage),
+                  AppLocalizations.translate('AgriTalks', currentLanguage),
                   style: TextStyle(
                     color: Colors.white,
                     fontStyle: FontStyle.italic,

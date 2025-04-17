@@ -1,3 +1,4 @@
+import 'package:farmcare/Auth/loginPage.dart';
 import 'package:farmcare/UserPage/Blog/Create_Blog/create_blog_ui.dart'; // Add this import
 import 'package:farmcare/UserPage/Settings/language_settings.dart';
 import 'package:farmcare/utils/app_localizations.dart';
@@ -59,7 +60,9 @@ class _CustomDrawerState extends State<CustomDrawer> {
       );
 
       // Navigate to login screen
-      Navigator.pushReplacementNamed(context, '/login');
+      Navigator.pushReplacement(context, MaterialPageRoute(
+        builder: (context) => const LoginPage(),
+      ));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -143,7 +146,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
                 ),
                 _buildDrawerItem(
                   Icons.create_outlined,
-                  _getTranslatedText('createPost'),
+                  _getTranslatedText('Share AgriTalks'),
                   onTap: () => _navigateToCreateBlog(context),
                 ),
                 _buildDrawerItem(
@@ -171,7 +174,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
                 ),
                 _buildDrawerItem(
                   Icons.map,
-                  _getTranslatedText('Heat Disease Map'),
+                  _getTranslatedText('AgriHealth Tracker'),
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
