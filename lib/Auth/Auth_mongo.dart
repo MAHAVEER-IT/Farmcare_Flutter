@@ -110,42 +110,59 @@ class AuthService {
 
         final data = json.decode(response.body);
         if (data['token'] != null) {
-          // Save token and user data in SharedPreferences
-          await DatabaseService.saveUser(
-            data['userId'],
-            username,
-            data['token'],
-            data['name'] ?? '',
-            data['email'] ?? '',
-            data['userType'] ?? 'user',
-            data['location'] ?? 'Coimbatore', // Add location with default value
-          );
+          // Validate token before saving
+          if (data['token'].toString().isEmpty) {
+            throw Exception('Invalid token received');
+          }
+
+          // Save token and user data in SharedPreferences with error handling
+          try {
+            await DatabaseService.saveUser(
+              data['userId'],
+              username,
+              data['token'],
+              data['name'] ?? '',
+              data['email'] ?? '',
+              data['userType'] ?? 'user',
+              data['location'] ?? 'Coimbatore',
+            );
+          } catch (e) {
+            print('Error saving user data: $e');
+            throw Exception('Failed to save user data locally');
+          }
 
           print('Login successful - Token received and saved');
-          print('User type: ${data['userType']}');
           return {
             'success': true,
             'message': 'Login successful',
             'token': data['token'],
             'userId': data['userId'],
-            'location':
-                data['location'] ?? 'Coimbatore', // Add location to return
+            'location': data['location'] ?? 'Coimbatore',
           };
         } else {
           print('Login failed - No token in response');
           return {
             'success': false,
-            'message': data['message'] ?? 'Login failed: No token received',
+            'message': 'Login failed: Invalid server response',
           };
         }
+      } else if (response.statusCode == 401) {
+        return {
+          'success': false,
+          'message': 'Invalid username or password',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': 'User not found',
+        };
       } else {
         print('Login failed - Server response: ${response.body}');
         final data =
             response.body.isNotEmpty ? json.decode(response.body) : null;
         return {
           'success': false,
-          'message': data?['message'] ??
-              'Login failed: Server error ${response.statusCode}',
+          'message': data?['message'] ?? 'Server error: ${response.statusCode}',
         };
       }
     } catch (e) {
@@ -201,11 +218,23 @@ class DatabaseService {
       await storage.setString('name', name);
       await storage.setString('email', email);
       await storage.setString('userType', userType);
-      await storage.setString('location', location); // Save location
+      await storage.setString('location', location);
       print('User data saved in local storage');
     } catch (e) {
       print('Error saving user data: $e');
       throw Exception('Failed to save user data');
+    }
+  }
+
+  Future<bool> isLoggedIn() async {
+    try {
+      final storage = await prefs.SharedPreferences.getInstance();
+      final token = storage.getString('token');
+      final userId = storage.getString('userId');
+      return token != null && userId != null;
+    } catch (e) {
+      print('Error checking login status: $e');
+      return false;
     }
   }
 

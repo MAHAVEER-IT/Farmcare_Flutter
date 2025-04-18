@@ -102,18 +102,15 @@ class _HeatmapPageStateMap extends State<HeatmapPageMap> {
   }
 
   Future<void> _fetchDiseasePoints() async {
-    if (_currentLocation == null) return;
-
     setState(() => _isLoading = true);
 
     try {
       print(
-          'Fetching disease points for: ${_showPlantDiseases ? 'Plants' : 'Animals'}'); // Debug log
-      final points = await _service.getNearbyDiseasePoints(
-        latitude: _currentLocation!.latitude,
-        longitude: _currentLocation!.longitude,
-        radiusKm: 10.0,
+          'Fetching all disease points for: ${_showPlantDiseases ? 'Plants' : 'Animals'}'); // Debug log
+      final points = await _service.getAllDiseasePoints(
         isPlantDisease: _showPlantDiseases,
+        startDate: DateTime(_selectedDate.year, _selectedDate.month, 1),
+        endDate: DateTime(_selectedDate.year, _selectedDate.month + 1, 0),
       );
 
       print('Fetched ${points.length} points'); // Debug log

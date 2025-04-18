@@ -47,14 +47,13 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      final username = _emailController.text.contains('@')
-          ? _emailController.text.split('@')[0]
-          : _emailController.text;
+      // Use the full email if provided, otherwise use as username
+      final input = _emailController.text.trim();
 
-      print('Attempting login for username: $username');
+      print('Attempting login with input: $input');
 
       final result = await _authService.login(
-        username: username,
+        username: input,
         password: _passwordController.text,
       );
 
@@ -84,11 +83,16 @@ class _LoginPageState extends State<LoginPage> {
           (route) => false,
         );
       } else {
-        // Show error message
+        String errorMessage = result['message'] ?? 'Login failed';
+        if (errorMessage.contains('not found')) {
+          errorMessage = 'User not found. Please check your email/username.';
+        } else if (errorMessage.contains('password')) {
+          errorMessage = 'Incorrect password. Please try again.';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result['message'] ??
-                'Login failed: Please check your credentials'),
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(

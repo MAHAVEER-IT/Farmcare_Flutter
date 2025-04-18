@@ -62,39 +62,20 @@ class _DoctorsPageState extends State<DoctorsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        title: Text(
-          widget.isDoctor
-              ? (_currentIndex == 0 ? 'Chats' : 'Channels')
-              : (_currentIndex == 0 ? 'Doctors' : 'Channels'),
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          if (_currentIndex == 1)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ElevatedButton.icon(
-                onPressed: () => _showCreateChannelDialog(),
-                icon: const Icon(Icons.add),
-                label: const Text('New Channel'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green.shade400,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+      appBar: _currentIndex == 0
+          ? AppBar(
+              elevation: 0,
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black87,
+              title: Text(
+                widget.isDoctor ? 'Chats' : 'Doctors',
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-            ),
-        ],
-      ),
+            )
+          : null,
       body: _currentIndex == 0
           ? (widget.isDoctor ? _buildChatHistory() : _buildDoctorsList())
           : _buildChannelsScreen(),

@@ -213,4 +213,59 @@ class ChannelService {
       throw Exception('Failed to create channel: $e');
     }
   }
+
+  // Generate shareable channel link
+  Future<String> generateShareableLink(String channelId, String token) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/channel/share/$channelId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      print('Generate link response status: ${response.statusCode}');
+      print('Generate link response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        if (responseData['success'] == true && responseData['data'] != null) {
+          return responseData['data']['shareLink'];
+        }
+      }
+      throw Exception('Failed to generate shareable link');
+    } catch (e) {
+      print('Error generating shareable link: $e');
+      throw Exception('Failed to generate shareable link: $e');
+    }
+  }
+
+  // Join channel using shared link
+  Future<void> joinChannelViaLink(String shareToken, String token) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/channel/join-via-link'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode({
+          'shareToken': shareToken,
+        }),
+      );
+
+      print('Join via link response status: ${response.statusCode}');
+      print('Join via link response body: ${response.body}');
+
+      if (response.statusCode != 200) {
+        final Map<String, dynamic> errorData = json.decode(response.body);
+        throw Exception(
+            errorData['message'] ?? 'Failed to join channel via link');
+      }
+    } catch (e) {
+      print('Error joining channel via link: $e');
+      throw Exception('Failed to join channel via link: $e');
+    }
+  }
 }

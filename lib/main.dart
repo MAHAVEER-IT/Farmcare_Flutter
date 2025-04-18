@@ -1,10 +1,9 @@
-import 'package:farmcare/Auth/Auth_sql.dart';
+import 'package:farmcare/Auth/Auth_mongo.dart';
 import 'package:farmcare/Auth/loginPage.dart';
 import 'package:farmcare/UserPage/ContentPage.dart';
+import 'package:farmcare/utils/language_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
-import 'utils/language_provider.dart';
 
 void main() {
   runApp(
@@ -26,7 +25,7 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.green,
         scaffoldBackgroundColor: Colors.white,
       ),
-      home: LoginPage(),
+      home: AuthCheck(),
     );
   }
 }
