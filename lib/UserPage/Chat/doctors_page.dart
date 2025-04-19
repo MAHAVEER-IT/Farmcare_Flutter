@@ -109,7 +109,7 @@ class _DoctorsPageState extends State<DoctorsPage> {
             const BottomNavigationBarItem(
               icon: Icon(Icons.group),
               activeIcon: Icon(Icons.group, size: 28),
-              label: 'Channels',
+              label: 'Community Channels',
             ),
           ],
         ),

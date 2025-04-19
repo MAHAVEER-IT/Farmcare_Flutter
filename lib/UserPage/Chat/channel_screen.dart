@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../services/channel_service.dart';
 import 'channel_chat_screen.dart';
+import 'qr_scanner_screen.dart';
 
 class ChannelScreen extends StatefulWidget {
   final String currentUserId;
@@ -109,6 +111,11 @@ class _ChannelScreenState extends State<ChannelScreen> {
       elevation: 0,
       actions: [
         IconButton(
+          icon: const Icon(Icons.qr_code_scanner),
+          onPressed: () => _showQRScanner(),
+          tooltip: 'Scan QR Code',
+        ),
+        IconButton(
           icon: const Icon(Icons.link),
           onPressed: _showJoinWithLinkDialog,
           tooltip: 'Join with Link',
@@ -122,112 +129,39 @@ class _ChannelScreenState extends State<ChannelScreen> {
     );
   }
 
-  void _showJoinWithLinkDialog() {
-    final linkController = TextEditingController();
+  void _showQRScanner() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => QRScannerScreen(
+          onQRCodeScanned: (String code) async {
+            try {
+              final uri = Uri.parse(code);
+              final shareToken = uri.pathSegments.last;
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.link, color: Colors.blue.shade700),
-            const SizedBox(width: 12),
-            const Text('Join with Link'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: linkController,
-              decoration: InputDecoration(
-                labelText: 'Enter Channel Link',
-                hintText: 'Paste the channel link here',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                prefixIcon: const Icon(Icons.link),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.blue.shade700, width: 2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Enter the channel link shared with you to join the channel',
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: Colors.grey.shade600),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final link = linkController.text.trim();
-              if (link.isEmpty) {
+              await _channelService.joinChannelViaLink(
+                  shareToken, widget.token);
+              if (mounted) {
+                await _loadChannels();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a channel link')),
+                  const SnackBar(
+                    content: Text('Successfully joined channel via QR code'),
+                    backgroundColor: Colors.green,
+                  ),
                 );
-                return;
               }
-
-              try {
-                // Extract share token from the link
-                final uri = Uri.parse(link);
-                final shareToken = uri.pathSegments.last;
-
-                await _channelService.joinChannelViaLink(
-                  shareToken,
-                  widget.token,
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to join channel: $e'),
+                    backgroundColor: Colors.red,
+                  ),
                 );
-
-                if (mounted) {
-                  Navigator.pop(context);
-                  await _loadChannels();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Row(
-                        children: [
-                          Icon(Icons.check_circle, color: Colors.white),
-                          const SizedBox(width: 8),
-                          Text('Successfully joined channel'),
-                        ],
-                      ),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed to join channel: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
               }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade700,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text('Join'),
-          ),
-        ],
+            }
+          },
+        ),
       ),
     );
   }
@@ -454,82 +388,132 @@ class _ChannelScreenState extends State<ChannelScreen> {
 
       showModalBottomSheet(
         context: context,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
         builder: (context) => Container(
-          padding: EdgeInsets.all(20),
+          margin: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  Icon(Icons.share, color: Colors.blue.shade700),
-                  SizedBox(width: 12),
-                  Text(
-                    'Share Channel',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 20),
               Container(
-                padding: EdgeInsets.all(12),
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300),
+                  color: Colors.green.shade50,
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(20)),
                 ),
                 child: Row(
                   children: [
-                    Expanded(
-                      child: Text(
-                        shareableLink,
-                        style: TextStyle(fontSize: 16),
+                    Icon(Icons.share, color: Colors.green.shade700),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Share Channel',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade800,
                       ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.copy),
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: shareableLink));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Link copied to clipboard'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      },
                     ),
                   ],
                 ),
               ),
-              SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      icon: Icon(Icons.share),
-                      label: Text('Share Link'),
-                      onPressed: () {
-                        Share.share(
-                          'Join our channel "${channel.name}" on FarmCare!\n\n$shareableLink',
-                          subject: 'Join FarmCare Channel',
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue.shade700,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    // QR Code
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: QrImageView(
+                        data: shareableLink,
+                        version: QrVersions.auto,
+                        size: 200.0,
+                        eyeStyle: QrEyeStyle(
+                          eyeShape: QrEyeShape.square,
+                          color: Colors.green.shade700,
+                        ),
+                        dataModuleStyle: QrDataModuleStyle(
+                          dataModuleShape: QrDataModuleShape.square,
+                          color: Colors.green.shade700,
                         ),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 20),
+                    // Link sharing section
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              shareableLink,
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.copy),
+                            onPressed: () {
+                              Clipboard.setData(
+                                  ClipboardData(text: shareableLink));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Link copied to clipboard'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    // Share buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.share),
+                            label: const Text('Share Channel'),
+                            onPressed: () {
+                              Share.share(
+                                'Join our channel "${channel.name}" on FarmCare!\n\n$shareableLink',
+                                subject: 'Join FarmCare Channel',
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green.shade700,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -543,6 +527,116 @@ class _ChannelScreenState extends State<ChannelScreen> {
         ),
       );
     }
+  }
+
+  void _showJoinWithLinkDialog() {
+    final linkController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.link, color: Colors.blue.shade700),
+            const SizedBox(width: 12),
+            const Text('Join with Link'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: linkController,
+              decoration: InputDecoration(
+                labelText: 'Enter Channel Link',
+                hintText: 'Paste the channel link here',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                prefixIcon: const Icon(Icons.link),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.blue.shade700, width: 2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Enter the channel link shared with you to join the channel',
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final link = linkController.text.trim();
+              if (link.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a channel link')),
+                );
+                return;
+              }
+
+              try {
+                // Extract share token from the link
+                final uri = Uri.parse(link);
+                final shareToken = uri.pathSegments.last;
+
+                await _channelService.joinChannelViaLink(
+                  shareToken,
+                  widget.token,
+                );
+
+                if (mounted) {
+                  Navigator.pop(context);
+                  await _loadChannels();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.white),
+                          const SizedBox(width: 8),
+                          Text('Successfully joined channel'),
+                        ],
+                      ),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Failed to join channel: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text('Join'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showCreateChannelDialog() {
