@@ -1,0 +1,126 @@
+{
+  "project_info": {
+    "project_number": "657628802174",
+    "project_id": "farmsync-51a75",
+    "storage_bucket": "farmsync-51a75.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:657628802174:android:25ff68c85dd40cc12f3c2f",
+        "android_client_info": {
+          "package_name": "com.example.farmcare"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "657628802174-deipr4nplt7ulhj95hqq12fnn1bej841.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXWtkrkkcmwRrKlg6Vb6uSwdOu5xceiPw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "657628802174-deipr4nplt7ulhj95hqq12fnn1bej841.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "657628802174-ediq05ptb6k352hbqbql6hqei2n6d1kh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.farmsync"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:657628802174:android:8711ecb1bfa29cbb2f3c2f",
+        "android_client_info": {
+          "package_name": "com.example.farmsync"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "657628802174-d822p627asfjmh8k82rlm3tkvf0tdc6g.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.farmsync",
+            "certificate_hash": "4816120273ee294b1ed67d62e0115ee7d2bf1768"
+          }
+        },
+        {
+          "client_id": "657628802174-deipr4nplt7ulhj95hqq12fnn1bej841.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXWtkrkkcmwRrKlg6Vb6uSwdOu5xceiPw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "657628802174-deipr4nplt7ulhj95hqq12fnn1bej841.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "657628802174-ediq05ptb6k352hbqbql6hqei2n6d1kh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.farmsync"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:657628802174:android:db804b29ebe9bde22f3c2f",
+        "android_client_info": {
+          "package_name": "com.example.trainingflutter"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "657628802174-deipr4nplt7ulhj95hqq12fnn1bej841.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAXWtkrkkcmwRrKlg6Vb6uSwdOu5xceiPw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "657628802174-deipr4nplt7ulhj95hqq12fnn1bej841.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "657628802174-ediq05ptb6k352hbqbql6hqei2n6d1kh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.farmsync"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
