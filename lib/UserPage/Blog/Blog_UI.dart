@@ -1,18 +1,15 @@
 import 'dart:convert';
-
 import 'package:farmcare/UserPage/Blog/Blog_services.dart';
-import 'package:farmcare/UserPage/Blog/Create_Blog/create_blog_ui.dart';
-import 'package:farmcare/UserPage/Blog/Widgets/comment_dialog.dart';
 import 'package:farmcare/UserPage/Blog/post_detail.dart';
+import 'package:farmcare/UserPage/Blog/Widgets/comment_dialog.dart'
+    show CommentBottomSheet;
 import 'package:farmcare/UserPage/Drawer.dart';
 import 'package:farmcare/utils/app_localizations.dart';
 import 'package:farmcare/utils/language_provider.dart';
-import 'package:farmcare/widgets/share_button.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../services/weather_service.dart';
 import 'Weather_detail.dart';
 
@@ -637,7 +634,6 @@ class _BlogState extends State<Blog> {
   Future<void> _loadWeather() async {
     try {
       final weather = await _weatherService.getWeather();
-
       if (mounted) {
         setState(() {
           _weatherData = weather;
@@ -646,6 +642,29 @@ class _BlogState extends State<Blog> {
     } catch (e) {
       print('Weather loading error: $e');
     }
+  }
+
+  void _showComments(String postId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (_, controller) => CommentBottomSheet(
+          postId: postId,
+          onCommentAdded: () {
+            setState(() {
+              final post =
+                  _blogPosts.firstWhere((post) => post.postId == postId);
+              post.commentCount++;
+            });
+          },
+        ),
+      ),
+    );
   }
 
   Widget _buildPostCard(BlogPost post) {
@@ -756,27 +775,9 @@ class _BlogState extends State<Blog> {
                       SizedBox(width: 16),
                       IconButton(
                         icon: Icon(Icons.comment_outlined),
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (context) => CommentDialog(
-                              postId: post.postId,
-                              onCommentAdded: () {
-                                setState(() {
-                                  post.commentCount++;
-                                });
-                              },
-                            ),
-                          );
-                        },
+                        onPressed: () => _showComments(post.postId),
                       ),
                       Text('${post.commentCount}'),
-                      ShareButton(
-                        type: ShareType.post,
-                        id: post.postId,
-                        title: post.title,
-                        content: post.content,
-                      ),
                       Spacer(),
                       TextButton(
                         onPressed: () {

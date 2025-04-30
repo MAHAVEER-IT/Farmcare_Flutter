@@ -1,35 +1,43 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import '../Models/comment.dart';
 import '../Blog_services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
 
-class CommentDialog extends StatefulWidget {
+class CommentBottomSheet extends StatefulWidget {
   final String postId;
   final Function onCommentAdded;
 
-  const CommentDialog({
+  const CommentBottomSheet({
     Key? key,
     required this.postId,
     required this.onCommentAdded,
   }) : super(key: key);
 
   @override
-  _CommentDialogState createState() => _CommentDialogState();
+  _CommentBottomSheetState createState() => _CommentBottomSheetState();
 }
 
-class _CommentDialogState extends State<CommentDialog> {
+class _CommentBottomSheetState extends State<CommentBottomSheet> {
   final _commentController = TextEditingController();
   final _blogService = BlogService();
   List<Comment> _comments = [];
   bool _isLoading = false;
   String? _error;
+  String? _replyingToId; // ID of the comment being replied to
+  String _replyingToAuthor = ''; // Author name of the comment being replied to
 
   @override
   void initState() {
     super.initState();
     _loadComments();
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadComments() async {
@@ -167,98 +175,347 @@ class _CommentDialogState extends State<CommentDialog> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      child: Builder(
-        builder: (context) => Container(
-          padding: const EdgeInsets.all(16),
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.8,
+  void _showReplyField(Comment comment) {
+    setState(() {
+      _replyingToId = comment.id;
+      _replyingToAuthor = comment.authorName;
+      _commentController.text = '';
+    });
+    // Focus the text field
+    FocusScope.of(context).requestFocus(FocusNode());
+  }
+
+  void _cancelReply() {
+    setState(() {
+      _replyingToId = null;
+      _replyingToAuthor = '';
+      _commentController.text = '';
+    });
+  }
+
+  Future<void> _submitReply() async {
+    if (_replyingToId == null) return;
+
+    final content = _commentController.text.trim();
+    if (content.isEmpty) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final reply = await _blogService.addReply(_replyingToId!, content);
+
+      if (!mounted) return;
+
+      // Find the parent comment and add the reply
+      setState(() {
+        final parentIndex = _comments.indexWhere((c) => c.id == _replyingToId);
+        if (parentIndex != -1) {
+          final updatedComment = Comment(
+            id: _comments[parentIndex].id,
+            postId: _comments[parentIndex].postId,
+            userId: _comments[parentIndex].userId,
+            authorName: _comments[parentIndex].authorName,
+            content: _comments[parentIndex].content,
+            createdAt: _comments[parentIndex].createdAt,
+            replies: [..._comments[parentIndex].replies, reply],
+            replyCount: _comments[parentIndex].replyCount + 1,
+            likes: _comments[parentIndex].likes,
+            likeCount: _comments[parentIndex].likeCount,
+          );
+          _comments[parentIndex] = updatedComment;
+        }
+        _commentController.clear();
+        _replyingToId = null;
+        _replyingToAuthor = '';
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error adding reply: $e');
+      if (!mounted) return;
+
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to add reply. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _buildReplyBar() {
+    if (_replyingToId == null) return SizedBox.shrink();
+
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: Colors.grey[100],
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Replying to ${_replyingToAuthor}',
+              style: TextStyle(
+                color: Colors.green.shade800,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Comments',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _error != null
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(_error!),
-                                const SizedBox(height: 16),
-                                ElevatedButton(
-                                  onPressed: _loadComments,
-                                  child: const Text('Retry'),
-                                ),
-                              ],
-                            ),
-                          )
-                        : _comments.isEmpty
-                            ? const Center(child: Text('No comments yet'))
-                            : ListView.builder(
-                                itemCount: _comments.length,
-                                itemBuilder: (context, index) {
-                                  final comment = _comments[index];
-                                  print(
-                                      'Rendering comment: ${comment.content}'); // Debug log
-                                  return ListTile(
-                                    leading: CircleAvatar(
-                                      backgroundImage: NetworkImage(
-                                        "https://ui-avatars.com/api/?name=${Uri.encodeComponent(comment.authorName.replaceAll(' ', '+'))}",
-                                      ),
-                                    ),
-                                    title: Text(comment.authorName),
-                                    subtitle: Text(comment.content),
-                                    trailing: Text(
-                                      _formatDate(comment.createdAt),
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                  );
-                                },
-                              ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Row(
+          IconButton(
+            icon: Icon(Icons.close),
+            onPressed: _cancelReply,
+            color: Colors.grey[600],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCommentItem(Comment comment) {
+    return Card(
+      margin: EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Main comment
+          Padding(
+            padding: EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _commentController,
-                        decoration: const InputDecoration(
-                          hintText: 'Add a comment...',
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: null,
-                        textInputAction: TextInputAction.newline,
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundImage: NetworkImage(
+                        "https://ui-avatars.com/api/?name=${Uri.encodeComponent(comment.authorName.replaceAll(' ', '+'))}",
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.send),
-                      onPressed: _isLoading ? null : _addComment,
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            comment.authorName,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            _formatDate(comment.createdAt),
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ],
+                SizedBox(height: 8),
+                Text(comment.content),
+                SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton.icon(
+                      icon: Icon(Icons.reply, size: 16),
+                      label: Text('Reply'),
+                      onPressed: () => _showReplyField(comment),
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.grey[700],
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
+          // Replies section
+          if (comment.replies.isNotEmpty)
+            Container(
+              margin: EdgeInsets.only(left: 32),
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: Colors.grey[300]!,
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Column(
+                children: comment.replies.map((reply) {
+                  return Padding(
+                    padding: EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 12,
+                              backgroundImage: NetworkImage(
+                                "https://ui-avatars.com/api/?name=${Uri.encodeComponent(reply.authorName.replaceAll(' ', '+'))}",
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    reply.authorName,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  Text(
+                                    _formatDate(reply.createdAt),
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          reply.content,
+                          style: TextStyle(fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            width: 40,
+            height: 4,
+            margin: EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Comments',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          Divider(),
+          Expanded(
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(_error!),
+                            SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: _loadComments,
+                              child: Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : _comments.isEmpty
+                        ? Center(child: Text('No comments yet'))
+                        : ListView.builder(
+                            padding: EdgeInsets.all(16),
+                            itemCount: _comments.length,
+                            itemBuilder: (context, index) =>
+                                _buildCommentItem(_comments[index]),
+                          ),
+          ),
+          _buildReplyBar(),
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _commentController,
+                    decoration: InputDecoration(
+                      hintText: _replyingToId == null
+                          ? 'Add a comment...'
+                          : 'Add your reply...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                    maxLines: null,
+                    textInputAction: TextInputAction.newline,
+                  ),
+                ),
+                SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(Icons.send),
+                  onPressed: _isLoading
+                      ? null
+                      : () {
+                          if (_replyingToId != null) {
+                            _submitReply();
+                          } else {
+                            _addComment();
+                          }
+                        },
+                  color: Colors.green,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
   String _formatDate(String date) {
     final DateTime dateTime = DateTime.parse(date);
-    return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
+    return DateFormat('MMM d, yyyy • h:mm a').format(dateTime);
   }
 }

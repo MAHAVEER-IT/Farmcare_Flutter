@@ -608,15 +608,24 @@ class _PostDetailPageState extends State<PostDetailPage> {
                               // Comment button
                               InkWell(
                                 onTap: () {
-                                  showDialog(
+                                  showModalBottomSheet(
                                     context: context,
-                                    builder: (context) => CommentDialog(
-                                      postId: post.postId,
-                                      onCommentAdded: () {
-                                        setState(() {
-                                          post.commentCount++;
-                                        });
-                                      },
+                                    isScrollControlled: true,
+                                    backgroundColor: Colors.transparent,
+                                    builder: (context) =>
+                                        DraggableScrollableSheet(
+                                      initialChildSize: 0.7,
+                                      minChildSize: 0.5,
+                                      maxChildSize: 0.95,
+                                      builder: (_, controller) =>
+                                          CommentBottomSheet(
+                                        postId: post.postId,
+                                        onCommentAdded: () {
+                                          setState(() {
+                                            post.commentCount++;
+                                          });
+                                        },
+                                      ),
                                     ),
                                   );
                                 },
